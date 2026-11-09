@@ -616,7 +616,9 @@
           : `${gekozen.slice(0, -1).join(", ")} of ${gekozen.at(-1)}`;
         const zinnen = [`Geen adressen gevonden waarvan het bestemmingsplan ${genoemd} noemt.`];
         if (gekozen.includes("hotel") || gekozen.includes("logies")) zinnen.push("Veel plannen schrijven alleen “horeca”.");
-        if (gekozen.includes("kamerverhuur") || gekozen.includes("kamerbewoning")) zinnen.push("Kamerverhuur en kamerbewoning staan zelden als vlak op de kaart. Het plan noemt dan wonen, centrum of gemengd.");
+        const kamers = gekozen.filter((woord) => woord === "kamerverhuur" || woord === "kamerbewoning");
+        if (kamers.length === 1) zinnen.push(`${kamers[0][0].toUpperCase()}${kamers[0].slice(1)} staat in deze gemeente niet als vlak op de kaart.`);
+        if (kamers.length > 1) zinnen.push("Kamerverhuur en kamerbewoning staan in deze gemeente niet als vlak op de kaart.");
         lijst.innerHTML = `<p>${zinnen.map(escapeHtml).join(" ")}</p>`;
         return;
       }
