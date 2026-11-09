@@ -210,8 +210,9 @@ def past_bij(naam: str, gekozen: list[str]) -> bool:
 def plannen(vak: dict) -> list[str]:
     breedte = max(vak["maxx"] - vak["minx"], 1)
     hoogte = max(vak["maxy"] - vak["miny"], 1)
-    kolommen = min(8, max(3, math.ceil(breedte / 2200)))
-    rijen = min(8, max(3, math.ceil(hoogte / 2200)))
+    stap = 900 if max(breedte, hoogte) < 16000 else 2200
+    kolommen = min(12, max(3, math.ceil(breedte / stap)))
+    rijen = min(12, max(3, math.ceil(hoogte / stap)))
     punten = []
     for kolom in range(kolommen):
         for rij in range(rijen):
@@ -510,8 +511,9 @@ def vlakken(plan_ids: list[str], vak: dict, gekozen: list[str]) -> list[dict]:
             continue
         span = max(stuk["maxx"] - stuk["minx"], stuk["maxy"] - stuk["miny"])
         zoom = 11 if span <= 1800 else zoom_voor(stuk)
-        limiet = 8 if span > 8000 else 20
-        for x, y in spreid(tegel_bereik(stuk, zoom), limiet):
+        tegels = tegel_bereik(stuk, zoom)
+        limiet = len(tegels) if len(tegels) <= 20 else (8 if span > 8000 else 20)
+        for x, y in spreid(tegels, limiet):
             taken.append((plan_id, zoom, x, y))
     gevonden = []
     with ThreadPoolExecutor(max_workers=12) as pool:

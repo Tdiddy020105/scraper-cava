@@ -184,8 +184,9 @@ async function planInfo(x, y) {
 async function plannen(vak) {
   const breedte = Math.max(vak.maxx - vak.minx, 1);
   const hoogte = Math.max(vak.maxy - vak.miny, 1);
-  const kolommen = Math.min(8, Math.max(3, Math.ceil(breedte / 2200)));
-  const rijen = Math.min(8, Math.max(3, Math.ceil(hoogte / 2200)));
+  const stap = Math.max(breedte, hoogte) < 16000 ? 900 : 2200;
+  const kolommen = Math.min(12, Math.max(3, Math.ceil(breedte / stap)));
+  const rijen = Math.min(12, Math.max(3, Math.ceil(hoogte / stap)));
   const punten = [];
   for (let kolom = 0; kolom < kolommen; kolom += 1) {
     for (let rij = 0; rij < rijen; rij += 1) {
@@ -453,8 +454,9 @@ async function vlakken(planIds, vak, gekozen) {
     if (!stuk) return;
     const span = Math.max(stuk.maxx - stuk.minx, stuk.maxy - stuk.miny);
     const zoom = span <= 1800 ? 11 : zoomVoor(stuk);
-    const limiet = span > 8000 ? 8 : 20;
-    for (const [x, y] of spreid(tegelBereik(stuk, zoom), limiet)) taken.push([planId, zoom, x, y]);
+    const tegels = tegelBereik(stuk, zoom);
+    const limiet = tegels.length <= 20 ? tegels.length : (span > 8000 ? 8 : 20);
+    for (const [x, y] of spreid(tegels, limiet)) taken.push([planId, zoom, x, y]);
   });
   const batches = await pool(taken, 12, ([planId, zoom, x, y]) => tegel(planId, zoom, x, y, gekozen));
   const uniek = new Map();
