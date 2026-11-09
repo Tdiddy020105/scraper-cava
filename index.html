@@ -241,6 +241,7 @@
         <label class="vink"><input type="checkbox" name="term" value="hotel" checked>Hotel</label>
         <label class="vink"><input type="checkbox" name="term" value="kamerverhuur" checked>Kamerverhuur</label>
         <label class="vink"><input type="checkbox" name="term" value="kamerbewoning" checked>Kamerbewoning</label>
+        <label class="vink"><input type="checkbox" name="term" value="horeca">Horeca</label>
       </div>
       <div class="presets">
         <button type="button" data-preset="horeca">Horecavergunning</button>
@@ -615,7 +616,7 @@
           ? (gekozen[0] || "die bestemming")
           : `${gekozen.slice(0, -1).join(", ")} of ${gekozen.at(-1)}`;
         const zinnen = [`Geen adressen gevonden waarvan het bestemmingsplan ${genoemd} noemt.`];
-        if (gekozen.includes("hotel") || gekozen.includes("logies")) zinnen.push("Veel plannen schrijven alleen “horeca”.");
+        if ((gekozen.includes("hotel") || gekozen.includes("logies")) && !gekozen.includes("horeca")) zinnen.push("Vink Horeca aan. Veel plannen schrijven alleen dat.");
         const kamers = gekozen.filter((woord) => woord === "kamerverhuur" || woord === "kamerbewoning");
         if (data.geenVlak) zinnen.push("De landelijke kaart heeft voor deze gemeente geen vlak met die naam.");
         else if (kamers.length && kamers.length === gekozen.length) zinnen.push("Er is wel een vlak, maar daar staat geen BAG-adres in.");
