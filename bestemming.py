@@ -16,6 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 USER_AGENT = "Scraper/0.2 (bestemming en BAG)"
 WMS = "https://service.pdok.nl/kadaster/plu/wms/v1_0"
@@ -31,6 +32,41 @@ TERMS = ("logies", "hotel", "kamerverhuur", "kamerbewoning")
 PLAN_TYPES = {"bestemmingsplan", "wijzigingsplan", "uitwerkingsplan", "beheersverordening", "inpassingsplan"}
 PLAN_ID = re.compile(r"NL\.IMRO\.\d{4}\.[A-Za-z0-9]+-[A-Za-z0-9]+")
 _cache: dict[str, tuple[float, dict]] = {}
+_INDEX: dict[str, dict[str, list[str]]] = json.loads(
+    (Path(__file__).parent / "netlify" / "functions" / "plannen-index.json").read_text(encoding="utf-8")
+)
+
+
+def plannen_uit_index(code: str, gekozen: list[str]) -> list[str]:
+    codes = [code] + {
+        "0014": ["0040"],
+        "0361": ["0365"],
+        "0484": ["0499"],
+        "0575": ["0576"],
+        "1901": ["0497"],
+        "1940": ["0055"],
+        "1945": ["0282"],
+        "1949": ["0063", "0070", "1908"],
+        "1950": ["0048"],
+        "1952": ["0040", "1987"],
+        "1959": ["0000"],
+        "1960": ["0236", "0733"],
+        "1961": ["0545", "0707"],
+        "1963": ["0584", "0585"],
+        "1966": ["1651"],
+        "1970": ["0058", "1722"],
+        "1979": ["0003", "0010"],
+        "1980": ["0416"],
+        "1982": ["0756", "0815", "1702"],
+        "1992": ["0501", "0614"],
+    }.get(code or "", [])
+    ids: list[str] = []
+    for gemeente in codes:
+        for term in gekozen:
+            for plan_id in (_INDEX.get(gemeente) or {}).get(term) or []:
+                if plan_id not in ids:
+                    ids.append(plan_id)
+    return ids
 
 
 def fetch(url: str, accept: str = "*/*", timeout: int = 25) -> tuple[int, bytes]:
@@ -498,13 +534,13 @@ def zelfde_gemeente(plan_id: str, code: str) -> bool:
     return delen[2] == code or delen[2].startswith("99")
 
 
-def vlakken(plan_ids: list[str], vak: dict, gekozen: list[str]) -> list[dict]:
+def vlakken(plan_ids: list[str], vak: dict, gekozen: list[str], volledig: set[str] | None = None) -> list[dict]:
     taken = []
     with ThreadPoolExecutor(max_workers=8) as pool:
         grenzen = list(pool.map(plan_vak, plan_ids))
     code = vak.get("code") or ""
     for plan_id, grens in zip(plan_ids, grenzen):
-        if not zelfde_gemeente(plan_id, code):
+        if not zelfde_gemeente(plan_id, code) and not (volledig and plan_id in volledig):
             continue
         stuk = doorsnede(vak, grens) if grens else None
         if not stuk:
@@ -512,7 +548,10 @@ def vlakken(plan_ids: list[str], vak: dict, gekozen: list[str]) -> list[dict]:
         span = max(stuk["maxx"] - stuk["minx"], stuk["maxy"] - stuk["miny"])
         zoom = 11 if span <= 1800 else zoom_voor(stuk)
         tegels = tegel_bereik(stuk, zoom)
-        limiet = len(tegels) if len(tegels) <= 20 else (8 if span > 8000 else 20)
+        if volledig and plan_id in volledig:
+            limiet = len(tegels) if len(tegels) <= 40 else 40
+        else:
+            limiet = len(tegels) if len(tegels) <= 20 else (8 if span > 8000 else 20)
         for x, y in spreid(tegels, limiet):
             taken.append((plan_id, zoom, x, y))
     gevonden = []
@@ -620,8 +659,8 @@ def adressen_van_vlak(vlak: dict, vak: dict) -> list[dict]:
             continue
         props = feature.get("properties") or {}
         if vak.get("gemeente"):
-            bron = (props.get("bronhouder_naam") or "").casefold()
-            if bron and bron != vak["gemeente"].casefold():
+            bron = (props.get("bronhouder_naam") or "").strip().casefold()
+            if bron and bron != vak["gemeente"].strip().casefold():
                 continue
         adres = adres_tekst(props)
         if not adres:
@@ -674,9 +713,11 @@ def zoek(params: dict) -> dict:
         bundel = gecached[1]
     else:
         try:
-            plan_ids = plannen(vak)
-            vlak_lijst = [vlak for vlak in vlakken(plan_ids, vak, gekozen) if overlapt(vlak, vak)]
+            uit_index = plannen_uit_index(vak.get("code") or "", gekozen)
+            plan_ids = list(dict.fromkeys(uit_index + plannen(vak)))
+            vlak_lijst = [vlak for vlak in vlakken(plan_ids, vak, gekozen, set(uit_index)) if overlapt(vlak, vak)]
             matches, afgekapt = adressen(vlak_lijst, vak, gekozen) if vlak_lijst else ([], False)
+            afgekapt = afgekapt or len(vlak_lijst) > 80
         except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
             return {"fout": "De bestemmingskaart of de BAG antwoordt niet."}
         matches.sort(key=lambda item: item["adres"])
@@ -693,6 +734,7 @@ def zoek(params: dict) -> dict:
         "afgekapt": bundel["afgekapt"],
         "gebied": vak["label"],
         "bestemming": gekozen,
+        "geenVlak": all(term in {"kamerverhuur", "kamerbewoning"} for term in gekozen) and bool(vak.get("code")) and not plannen_uit_index(vak.get("code") or "", gekozen),
         "bron": "Vastgesteld bestemmingsplan via PDOK, halfjaarlijks bijgewerkt. Adressen uit de BAG.",
         "resultaten": matches[start:start + PAGE_SIZE],
     }

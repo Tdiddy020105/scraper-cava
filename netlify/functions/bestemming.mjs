@@ -1,4 +1,7 @@
 import { gunzipSync } from "node:zlib";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const USER_AGENT = "Scraper/0.2 (bestemming en BAG)";
 const WMS = "https://service.pdok.nl/kadaster/plu/wms/v1_0";
@@ -14,6 +17,42 @@ const TERMS = ["logies", "hotel", "kamerverhuur", "kamerbewoning"];
 const PLAN_TYPES = new Set(["bestemmingsplan", "wijzigingsplan", "uitwerkingsplan", "beheersverordening", "inpassingsplan"]);
 const PLAN_ID = /^NL\.IMRO\.\d{4}\.[A-Za-z0-9]+-[A-Za-z0-9]+$/;
 const cache = new Map();
+const INDEX = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "plannen-index.json"), "utf8"));
+
+function plannenUitIndex(code, gekozen) {
+  const codes = [code, ...({
+    "0014": ["0040"],
+    "0361": ["0365"],
+    "0484": ["0499"],
+    "0575": ["0576"],
+    "1901": ["0497"],
+    "1940": ["0055"],
+    "1945": ["0282"],
+    "1949": ["0063", "0070", "1908"],
+    "1950": ["0048"],
+    "1952": ["0040", "1987"],
+    "1959": ["0000"],
+    "1960": ["0236", "0733"],
+    "1961": ["0545", "0707"],
+    "1963": ["0584", "0585"],
+    "1966": ["1651"],
+    "1970": ["0058", "1722"],
+    "1979": ["0003", "0010"],
+    "1980": ["0416"],
+    "1982": ["0756", "0815", "1702"],
+    "1992": ["0501", "0614"],
+  }[code] || [])];
+  const ids = [];
+  for (const gemeente of codes) {
+    const termen = INDEX[gemeente] || {};
+    for (const term of gekozen) {
+      for (const planId of termen[term] || []) {
+        if (!ids.includes(planId)) ids.push(planId);
+      }
+    }
+  }
+  return ids;
+}
 
 async function fetchBytes(url, timeout = 25000) {
   const response = await fetch(url, {
@@ -445,17 +484,19 @@ function zelfdeGemeente(planId, code) {
   return planCode === code || planCode.startsWith("99");
 }
 
-async function vlakken(planIds, vak, gekozen) {
+async function vlakken(planIds, vak, gekozen, volledig = new Set()) {
   const grenzen = await pool(planIds, 8, planVak);
   const taken = [];
   planIds.forEach((planId, index) => {
-    if (!zelfdeGemeente(planId, vak.code || "")) return;
+    if (!zelfdeGemeente(planId, vak.code || "") && !volledig.has(planId)) return;
     const stuk = grenzen[index] ? doorsnede(vak, grenzen[index]) : null;
     if (!stuk) return;
     const span = Math.max(stuk.maxx - stuk.minx, stuk.maxy - stuk.miny);
     const zoom = span <= 1800 ? 11 : zoomVoor(stuk);
     const tegels = tegelBereik(stuk, zoom);
-    const limiet = tegels.length <= 20 ? tegels.length : (span > 8000 ? 8 : 20);
+    const limiet = volledig.has(planId)
+      ? Math.min(tegels.length, 40)
+      : (tegels.length <= 20 ? tegels.length : (span > 8000 ? 8 : 20));
     for (const [x, y] of spreid(tegels, limiet)) taken.push([planId, zoom, x, y]);
   });
   const batches = await pool(taken, 12, ([planId, zoom, x, y]) => tegel(planId, zoom, x, y, gekozen));
@@ -552,7 +593,7 @@ async function adressenVanVlak(vlak, vak) {
     if (vak.straal && vak.cx != null && (x - vak.cx) ** 2 + (y - vak.cy) ** 2 > vak.straal ** 2) continue;
     if (!binnen(x, y, vlak.ringen) && (groot || afstand(x, y, vlak.ringen) > 12)) continue;
     const props = feature.properties || {};
-    if (vak.gemeente && props.bronhouder_naam && props.bronhouder_naam.toLowerCase() !== vak.gemeente.toLowerCase()) continue;
+    if (vak.gemeente && props.bronhouder_naam && props.bronhouder_naam.trim().toLowerCase() !== String(vak.gemeente).trim().toLowerCase()) continue;
     const adres = adresTekst(props);
     if (!adres) continue;
     gevonden.push({
@@ -599,9 +640,11 @@ export async function zoek(params) {
   let bundel = gecached && nu - gecached[0] < 600000 ? gecached[1] : null;
   if (!bundel) {
     try {
-      const planIds = await plannen(vak);
-      const vlakLijst = (await vlakken(planIds, vak, gekozen)).filter((vlak) => overlapt(vlak, vak));
-      const [matches, afgekapt] = vlakLijst.length ? await adressen(vlakLijst, vak) : [[], false];
+      const uitIndex = plannenUitIndex(vak.code || "", gekozen);
+      const planIds = [...new Set([...uitIndex, ...await plannen(vak)])];
+      const vlakLijst = (await vlakken(planIds, vak, gekozen, new Set(uitIndex))).filter((vlak) => overlapt(vlak, vak));
+      const [matches, afgekaptVlak] = vlakLijst.length ? await adressen(vlakLijst, vak) : [[], false];
+      const afgekapt = afgekaptVlak || vlakLijst.length > 80;
       matches.sort((a, b) => a.adres.localeCompare(b.adres, "nl"));
       bundel = { matches, afgekapt };
       if (cache.size > 12) cache.clear();
@@ -618,6 +661,7 @@ export async function zoek(params) {
     afgekapt: bundel.afgekapt,
     gebied: vak.label,
     bestemming: gekozen,
+    geenVlak: gekozen.every((term) => term === "kamerverhuur" || term === "kamerbewoning") && Boolean(vak.code) && plannenUitIndex(vak.code || "", gekozen).length === 0,
     bron: "Vastgesteld bestemmingsplan via PDOK, halfjaarlijks bijgewerkt. Adressen uit de BAG.",
     resultaten: bundel.matches.slice(start, start + PAGE_SIZE),
   };
