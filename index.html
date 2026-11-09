@@ -610,7 +610,14 @@
       status.textContent = extra ? `${aantal} adressen. ${extra}` : `${aantal} adressen.`;
       if (invouwen && smal.matches) zetFilters(false);
       if (data.resultaten.length === 0) {
-        lijst.innerHTML = "<p>Geen adressen gevonden waarvan het bestemmingsplan logies, hotel, kamerverhuur of kamerbewoning noemt. Veel plannen schrijven alleen “horeca”.</p>";
+        const gekozen = [...document.querySelectorAll("input[name=term]:checked")].map((input) => input.value);
+        const genoemd = gekozen.length < 2
+          ? (gekozen[0] || "die bestemming")
+          : `${gekozen.slice(0, -1).join(", ")} of ${gekozen.at(-1)}`;
+        const zinnen = [`Geen adressen gevonden waarvan het bestemmingsplan ${genoemd} noemt.`];
+        if (gekozen.includes("hotel") || gekozen.includes("logies")) zinnen.push("Veel plannen schrijven alleen “horeca”.");
+        if (gekozen.includes("kamerverhuur") || gekozen.includes("kamerbewoning")) zinnen.push("Kamerverhuur en kamerbewoning staan zelden als vlak op de kaart. Het plan noemt dan wonen, centrum of gemengd.");
+        lijst.innerHTML = `<p>${zinnen.map(escapeHtml).join(" ")}</p>`;
         return;
       }
       lijst.innerHTML = data.resultaten.map((item) => `
