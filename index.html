@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scraper</title>
+  <style>
+    :root {
+      --ink: #1c1915;
+      --muted: #5e584f;
+      --line: #e4ddd2;
+      --paper: #f6f1e8;
+      --card: #fffdf9;
+      --accent: #9a3b12;
+      --accent-soft: #f3e2d6;
+      --ok: #1f6b45;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 16px/1.45 "Segoe UI", system-ui, sans-serif;
+    }
+    header, main { width: min(980px, calc(100% - 32px)); margin: 0 auto; }
+    header { padding: 28px 0 0; }
+    h1 { margin: 0; font-size: 34px; letter-spacing: -0.04em; }
+    form {
+      margin: 22px 0;
+      padding: 16px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    button, .ghost {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 8px 14px;
+      min-height: 40px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.active, button.primary {
+      background: var(--ink);
+      color: #fff;
+      border-color: var(--ink);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.3fr 1fr 1fr 0.8fr auto;
+      gap: 10px;
+      align-items: end;
+    }
+    label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 9px 10px;
+      min-height: 44px;
+      font: inherit;
+      font-size: 16px;
+      color: var(--ink);
+    }
+    .checks {
+      display: grid;
+      grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+      gap: 12px 16px;
+      align-items: end;
+      margin-top: 12px;
+    }
+    .checks > label:first-child { color: var(--muted); font-size: 13px; }
+    .checks .vink {
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
+      min-height: 44px;
+      color: var(--ink);
+      font-size: 15px;
+    }
+    input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
+      min-height: 18px;
+      padding: 0;
+      flex: 0 0 18px;
+      accent-color: var(--ink);
+    }
+    #fase { width: 100%; }
+    .suggest { position: relative; }
+    .suggest ul {
+      position: absolute;
+      z-index: 2;
+      left: 0; right: 0; top: calc(100% + 4px);
+      margin: 0; padding: 4px;
+      list-style: none;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .suggest li { padding: 10px 8px; border-radius: 6px; cursor: pointer; }
+    .suggest li:hover { background: var(--accent-soft); }
+    .status { color: var(--muted); min-height: 1.4em; }
+    .kaart {
+      display: grid;
+      gap: 6px;
+      padding: 16px 0;
+      border-top: 1px solid var(--line);
+    }
+    .kaart h2 { margin: 0; font-size: 18px; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 14px; }
+    .pill {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+    }
+    .adres { font-weight: 650; overflow-wrap: anywhere; }
+    .benadering { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; font-weight: 400; }
+    .regio { grid-template-columns: 1.2fr 1fr 0.7fr; margin-top: 10px; }
+    .acties { display: flex; flex-wrap: wrap; gap: 8px; }
+    .acties a {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 8px 14px;
+      min-height: 40px;
+      text-decoration: none;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { background: #efe8dc; border-radius: 999px; padding: 3px 8px; font-size: 13px; }
+    .pand iframe { width: 100%; height: 190px; border: 0; border-radius: 10px; }
+    .pand-fout { color: var(--accent); font-size: 14px; margin: 0; }
+    .contact { display: grid; gap: 8px; margin-top: 12px; }
+    .contact h3 { margin: 0; font-size: 15px; }
+    .contact dl { display: grid; grid-template-columns: 9.5rem 1fr; gap: 4px 12px; margin: 0; }
+    .contact dt { color: var(--muted); }
+    .contact dd { margin: 0; overflow-wrap: anywhere; }
+    .contact a { color: var(--accent); }
+    .redenen { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+    .redenen strong { color: var(--ink); font-weight: 650; }
+    .links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+    .links a { color: var(--accent); padding: 4px 0; }
+    .pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 40px; }
+    .note {
+      margin: 28px 0 48px;
+      color: var(--muted);
+      font-size: 13px;
+      max-width: 78ch;
+    }
+    .fout { color: var(--accent); }
+    @media (max-width: 800px) {
+      header, main { width: min(980px, calc(100% - 24px)); }
+      header { padding-top: 20px; }
+      h1 { font-size: 28px; }
+      form { padding: 12px; }
+      .grid, .regio { grid-template-columns: 1fr; }
+      .acties a, .acties button { flex: 1 1 auto; text-align: center; }
+      .checks { grid-template-columns: 1fr; }
+      #fase, button.primary { width: 100%; }
+      .kaart h2 { font-size: 17px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Scraper</h1>
+  </header>
+  <main>
+    <form id="zoek">
+      <div class="presets">
+        <button type="button" data-preset="horeca">Horecavergunning</button>
+        <button type="button" data-preset="plan">Planwijziging horeca</button>
+        <button type="button" data-preset="functie">Functiewijziging</button>
+        <button type="button" data-preset="transformatie">Transformatie</button>
+      </div>
+      <div class="grid">
+        <label class="suggest">Gemeente
+          <input id="gemeente" name="gemeente" placeholder="Bijv. Amsterdam" autocomplete="off">
+          <ul id="suggesties" hidden></ul>
+        </label>
+        <label>Trefwoord
+          <input id="q" name="q" value="horeca" placeholder="horeca, hotel, kantoor">
+        </label>
+        <label>Soort
+          <select id="rubriek" name="rubriek">
+            <option value="vergunning">Omgevingsvergunning</option>
+            <option value="plan">Bestemmingsplan / omgevingsplan</option>
+            <option value="exploitatie">Exploitatievergunning</option>
+            <option value="melding">Exploitatiemelding</option>
+            <option value="vroeg">Plannen en vergunningen samen</option>
+          </select>
+        </label>
+        <label>Vanaf
+          <input id="vanaf" name="vanaf" type="date">
+        </label>
+        <button class="primary" type="submit">Zoek</button>
+      </div>
+      <div class="grid regio">
+        <label>Provincie
+          <select id="provincie" name="provincie">
+            <option value="">Heel Nederland</option>
+            <option>Drenthe</option>
+            <option>Flevoland</option>
+            <option>Fryslân</option>
+            <option>Gelderland</option>
+            <option>Groningen</option>
+            <option>Limburg</option>
+            <option>Noord-Brabant</option>
+            <option>Noord-Holland</option>
+            <option>Overijssel</option>
+            <option>Utrecht</option>
+            <option>Zeeland</option>
+            <option>Zuid-Holland</option>
+          </select>
+        </label>
+        <label>Plaats
+          <input id="plaats" name="plaats" placeholder="Bijv. Utrecht" autocomplete="off">
+        </label>
+        <label>Straal
+          <select id="straal" name="straal">
+            <option value="">Geen</option>
+            <option value="2">2 km</option>
+            <option value="5">5 km</option>
+            <option value="10">10 km</option>
+            <option value="15">15 km</option>
+          </select>
+        </label>
+      </div>
+      <div class="checks">
+        <label>Fase
+          <select id="fase" name="fase">
+            <option value="">Alles</option>
+            <option value="ontwerp">Ontwerp / ter inzage</option>
+            <option value="vastgesteld">Vastgesteld of verleend</option>
+          </select>
+        </label>
+        <label class="vink"><input id="adres" name="adres" type="checkbox"><span>Alleen publicaties met een straatadres</span></label>
+      </div>
+    </form>
+    <p id="status" class="status"></p>
+    <div id="lijst"></div>
+    <div id="pager" class="pager"></div>
+    <p class="note">Bron: Officiële Bekendmakingen en de open BAG. Bij pandgegevens wordt het perceel opgezocht en, met een Kadaster-sleutel, de eigenaar. Van organisaties worden openbare contactgegevens gezocht. Van particulieren wordt geen e-mail of telefoonnummer gezocht. Een straal zonder gekozen kilometer gebruikt 5 km.</p>
+  </main>
+  <script>
+    const form = document.querySelector("#zoek");
+    const status = document.querySelector("#status");
+    const lijst = document.querySelector("#lijst");
+    const pager = document.querySelector("#pager");
+    const suggesties = document.querySelector("#suggesties");
+    const gemeente = document.querySelector("#gemeente");
+    let pagina = 1;
+    let timer;
+    let verzoek = 0;
+
+    const jaarGeleden = new Date();
+    jaarGeleden.setFullYear(jaarGeleden.getFullYear() - 1);
+    document.querySelector("#vanaf").value = jaarGeleden.toISOString().slice(0, 10);
+
+    const presets = {
+      horeca: { rubriek: "vergunning", q: "horeca", fase: "" },
+      plan: { rubriek: "plan", q: "horeca", fase: "ontwerp" },
+      functie: { rubriek: "vergunning", q: "functiewijziging", fase: "" },
+      transformatie: { rubriek: "plan", q: "transformatie", fase: "" },
+    };
+
+    document.querySelectorAll("[data-preset]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const preset = presets[button.dataset.preset];
+        document.querySelector("#rubriek").value = preset.rubriek;
+        document.querySelector("#q").value = preset.q;
+        document.querySelector("#fase").value = preset.fase;
+        document.querySelectorAll("[data-preset]").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        pagina = 1;
+        zoek();
+      });
+    });
+
+    gemeente.addEventListener("input", () => {
+      clearTimeout(timer);
+      const term = gemeente.value.trim();
+      if (term.length < 2) {
+        suggesties.hidden = true;
+        return;
+      }
+      timer = setTimeout(async () => {
+        const response = await fetch("/api/gemeenten?q=" + encodeURIComponent(term));
+        const data = await response.json();
+        suggesties.innerHTML = "";
+        data.gemeenten.forEach((naam) => {
+          const item = document.createElement("li");
+          item.textContent = naam;
+          item.addEventListener("click", () => {
+            gemeente.value = naam;
+            suggesties.hidden = true;
+          });
+          suggesties.appendChild(item);
+        });
+        suggesties.hidden = data.gemeenten.length === 0;
+      }, 180);
+    });
+
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest(".suggest")) suggesties.hidden = true;
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      suggesties.hidden = true;
+      pagina = 1;
+      zoek();
+    });
+
+    function params() {
+      const data = new FormData(form);
+      const query = new URLSearchParams();
+      for (const [key, value] of data.entries()) {
+        if (value) query.set(key, value);
+      }
+      if (document.querySelector("#adres").checked) query.set("adres", "1");
+      query.set("page", String(pagina));
+      return query;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      })[char]);
+    }
+
+    const eigenaarTypen = {
+      private_individual: "Particulier",
+      company: "Bedrijf",
+      foundation: "Stichting",
+      municipality: "Gemeente",
+      government: "Overheid",
+      association: "Vereniging",
+      other_legal_entity: "Andere rechtspersoon",
+      unknown: "Niet vast te stellen",
+    };
+
+    function contactRegel(label, value, link) {
+      if (!value) return "";
+      const inhoud = link
+        ? `<a href="${escapeHtml(value)}" target="_blank" rel="noopener">${escapeHtml(value)}</a>`
+        : escapeHtml(value);
+      return `<dt>${escapeHtml(label)}</dt><dd>${inhoud}</dd>`;
+    }
+
+    function contactBlok(data) {
+      const eigenaar = data.ownership || {};
+      const contact = data.contact_information || {};
+      const regels = [
+        contactRegel("Perceel", eigenaar.parcel),
+        contactRegel("Eigenaar", eigenaar.owner_name),
+        contactRegel("Type", eigenaarTypen[eigenaar.owner_type] || eigenaar.owner_type),
+        contactRegel("Recht", eigenaar.right),
+        contactRegel("KVK", eigenaar.kvk_number || contact.kvk_number),
+        contactRegel("Organisatie", contact.company_name),
+        contactRegel("Website", contact.website, Boolean(contact.website)),
+        contactRegel("E-mail", contact.email),
+        contactRegel("Telefoon", contact.phone),
+        contactRegel("Vestigingsadres", contact.business_address),
+        contactRegel("Contactpersoon", contact.contact_person),
+        contactRegel("Bron", data.contact_source),
+        contactRegel("Geverifieerd", data.contact_verified ? "Ja" : "Nee"),
+      ].join("");
+      const redenen = (data.unavailable || []).map((item) =>
+        `<li><strong>${escapeHtml(item.reason || "")}</strong> ${escapeHtml(item.detail || "")}</li>`
+      ).join("");
+      return `<section class="contact"><h3>Eigenaar en contact</h3><dl>${regels}</dl>${redenen ? `<ul class="redenen">${redenen}</ul>` : ""}</section>`;
+    }
+
+    async function zoek() {
+      const huidig = ++verzoek;
+      status.textContent = "Zoeken in Officiële Bekendmakingen…";
+      lijst.innerHTML = "";
+      pager.innerHTML = "";
+      const response = await fetch("/api/zoek?" + params().toString());
+      if (huidig !== verzoek) return;
+      const data = await response.json();
+      if (data.fout) {
+        status.innerHTML = `<span class="fout">${escapeHtml(data.fout)}</span>`;
+        return;
+      }
+      const straalActief = document.querySelector("#plaats").value.trim() !== "";
+      const extra = [
+        data.adresFilter ? "Op deze pagina blijven alleen regels met een adres over." : "",
+        straalActief ? "Een straal vindt alleen publicaties met een kaartlocatie." : "",
+      ].filter(Boolean).join(" ");
+      const aantal = data.totaal.toLocaleString("nl-NL");
+      status.textContent = extra ? `${aantal} publicaties. ${extra}` : `${aantal} publicaties.`;
+      if (data.resultaten.length === 0) {
+        lijst.innerHTML = "<p>Geen resultaten. Verruim de datum, de gemeente of het trefwoord.</p>";
+        return;
+      }
+      lijst.innerHTML = data.resultaten.map((item) => `
+        <article class="kaart">
+          <div class="meta">
+            <span class="pill">${escapeHtml(item.type || "publicatie")}</span>
+            <span>${escapeHtml(item.datum || "")}</span>
+            <span>${escapeHtml(item.gemeente || "")}</span>
+            ${item.blad ? `<span>${escapeHtml(item.blad)}</span>` : ""}
+            ${item.reactieTot ? `<span>reageren tot ${escapeHtml(item.reactieTot)}</span>` : ""}
+          </div>
+          <h2>${escapeHtml(item.titel)}</h2>
+          ${item.adres ? `<div class="adres">${escapeHtml(item.adres)}${item.adresBron === "pdok" ? '<span class="benadering">Dichtstbijzijnde adres op de kaart</span>' : ""}</div>` : ""}
+          <div class="acties">
+            <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${item.reactieTot ? "Reageren via publicatie" : "Officiële publicatie"}</a>
+            ${item.planUrl ? `<a href="${escapeHtml(item.planUrl)}" target="_blank" rel="noopener">Regels op de kaart</a>` : ""}
+            ${item.lat && item.lon ? `<a href="https://www.openstreetmap.org/directions?to=${item.lat}%2C${item.lon}" target="_blank" rel="noopener">Route</a>` : (item.adres ? `<a href="https://www.openstreetmap.org/search?query=${encodeURIComponent(item.adres)}" target="_blank" rel="noopener">Route</a>` : "")}
+            ${item.adres ? `<button type="button" data-kopieer="${escapeHtml(item.adres)}">Kopieer adres</button>` : ""}
+            ${item.adres ? `<button type="button" data-pand="${escapeHtml(item.adres)}">Pandgegevens</button>` : ""}
+          </div>
+          <div class="pand" hidden></div>
+        </article>
+      `).join("");
+
+      const paginaAantal = Math.ceil(data.totaal / data.perPagina);
+      if (paginaAantal > 1) {
+        const vorige = document.createElement("button");
+        vorige.type = "button";
+        vorige.textContent = "Vorige";
+        vorige.disabled = pagina <= 1;
+        vorige.addEventListener("click", () => { pagina -= 1; zoek(); });
+        const volgende = document.createElement("button");
+        volgende.type = "button";
+        volgende.textContent = "Volgende";
+        volgende.disabled = pagina >= paginaAantal;
+        volgende.addEventListener("click", () => { pagina += 1; zoek(); });
+        const label = document.createElement("span");
+        label.textContent = `Pagina ${pagina} van ${paginaAantal.toLocaleString("nl-NL")}`;
+        pager.append(vorige, label, volgende);
+      }
+    }
+
+    lijst.addEventListener("click", async (event) => {
+      const kopie = event.target.closest("[data-kopieer]");
+      if (kopie) {
+        const adres = kopie.dataset.kopieer;
+        try {
+          await navigator.clipboard.writeText(adres);
+          kopie.textContent = "Gekopieerd";
+        } catch (error) {
+          kopie.textContent = adres;
+        }
+        return;
+      }
+      const knop = event.target.closest("[data-pand]");
+      if (!knop) return;
+      const vak = knop.closest("article").querySelector(".pand");
+      vak.hidden = false;
+      vak.textContent = "Pandgegevens, perceel en contact ophalen…";
+      const response = await fetch("/api/pand?adres=" + encodeURIComponent(knop.dataset.pand));
+      const data = await response.json();
+      if (data.fout) {
+        vak.innerHTML = `<p class="pand-fout">${escapeHtml(data.fout)}</p>`;
+        return;
+      }
+      const chips = [
+        data.oppervlakte ? `${data.oppervlakte} m²` : "",
+        data.bouwjaar ? `bouwjaar ${data.bouwjaar}` : "",
+        ...(data.gebruiksdoelen || []),
+        data.perceel ? `perceel ${data.perceel}` : "",
+      ].filter(Boolean);
+      const kaart = data.lat && data.lon
+        ? `<iframe title="Kaart" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${data.lon - 0.008}%2C${data.lat - 0.005}%2C${data.lon + 0.008}%2C${data.lat + 0.005}&amp;layer=mapnik&amp;marker=${data.lat}%2C${data.lon}"></iframe>
+           <div class="acties"><a href="https://www.openstreetmap.org/directions?to=${data.lat}%2C${data.lon}" target="_blank" rel="noopener">Route naar dit punt</a></div>`
+        : "";
+      vak.innerHTML = `<div class="chips">${chips.map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`).join("")}</div>${kaart}${contactBlok(data)}`;
+    });
+
+    zoek();
+  </script>
+</body>
+</html>
