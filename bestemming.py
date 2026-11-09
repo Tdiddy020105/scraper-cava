@@ -24,6 +24,34 @@ TILES = "https://service.pdok.nl/omgevingswet/ruimtelijkeplannen/api/v1_0/planne
 LOCATIE = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free"
 BAG = "https://api.pdok.nl/kadaster/bag/ogc/v2/collections/adres/items"
 GRENZEN = "https://api.pdok.nl/kadaster/bestuurlijkegebieden/ogc/v1/collections/gemeentegebied/items"
+PROVINCIES_GRENZEN = "https://api.pdok.nl/kadaster/bestuurlijkegebieden/ogc/v1/collections/provinciegebied/items"
+PROVINCIES = {
+    "Drenthe", "Flevoland", "Fryslân", "Gelderland", "Groningen", "Limburg",
+    "Noord-Brabant", "Noord-Holland", "Overijssel", "Utrecht", "Zeeland", "Zuid-Holland",
+}
+VOORGANGER = {
+    "0014": ["0040"],
+    "0361": ["0365"],
+    "0484": ["0499"],
+    "0575": ["0576"],
+    "1901": ["0497"],
+    "1940": ["0055"],
+    "1945": ["0282"],
+    "1949": ["0063", "0070", "1908"],
+    "1950": ["0048"],
+    "1952": ["0040", "1987"],
+    "1959": ["0000"],
+    "1960": ["0236", "0733"],
+    "1961": ["0545", "0707"],
+    "1963": ["0584", "0585"],
+    "1966": ["1651"],
+    "1970": ["0058", "1722"],
+    "1979": ["0003", "0010"],
+    "1980": ["0416"],
+    "1982": ["0756", "0815", "1702"],
+    "1992": ["0501", "0614"],
+}
+_provincie_cache: dict[str, list[dict]] = {}
 PAGE_SIZE = 15
 MAX_MATCHES = 400
 ORIGIN_X = -285401.92
@@ -38,28 +66,7 @@ _INDEX: dict[str, dict[str, list[str]]] = json.loads(
 
 
 def plannen_uit_index(code: str, gekozen: list[str]) -> list[str]:
-    codes = [code] + {
-        "0014": ["0040"],
-        "0361": ["0365"],
-        "0484": ["0499"],
-        "0575": ["0576"],
-        "1901": ["0497"],
-        "1940": ["0055"],
-        "1945": ["0282"],
-        "1949": ["0063", "0070", "1908"],
-        "1950": ["0048"],
-        "1952": ["0040", "1987"],
-        "1959": ["0000"],
-        "1960": ["0236", "0733"],
-        "1961": ["0545", "0707"],
-        "1963": ["0584", "0585"],
-        "1966": ["1651"],
-        "1970": ["0058", "1722"],
-        "1979": ["0003", "0010"],
-        "1980": ["0416"],
-        "1982": ["0756", "0815", "1702"],
-        "1992": ["0501", "0614"],
-    }.get(code or "", [])
+    codes = [code] + VOORGANGER.get(code or "", [])
     ids: list[str] = []
     for gemeente in codes:
         for term in gekozen:
@@ -163,7 +170,10 @@ def gebied(params: dict) -> tuple[dict | None, str | None]:
         if fout:
             return None, fout
         return vak, None
-    return None, "Kies een plaats of een gemeente."
+    provincie = (params.get("provincie") or "").strip()
+    if provincie:
+        return provincie_vak(provincie)
+    return None, "Kies een plaats, een gemeente of een provincie."
 
 
 def uitersten(coordinates) -> tuple[list[float], list[float]]:
@@ -224,6 +234,131 @@ def gemeente_vak(naam: str) -> tuple[dict | None, str | None]:
     }, None
 
 
+def gemeenten_van_provincie(naam: str) -> list[dict]:
+    if naam in _provincie_cache:
+        return _provincie_cache[naam]
+    url = LOCATIE + "?" + urllib.parse.urlencode(
+        [
+            ("q", "*"),
+            ("fq", "type:gemeente"),
+            ("fq", f"provincienaam:{naam}"),
+            ("rows", "100"),
+            ("fl", "gemeentecode,gemeentenaam,centroide_rd"),
+            ("sort", "gemeentenaam asc"),
+        ]
+    )
+    status, raw = fetch(url, "application/json", 30)
+    if status != 200:
+        return []
+    gemeenten = []
+    for doc in json.loads(raw.decode("utf-8")).get("response", {}).get("docs") or []:
+        code = str(doc.get("gemeentecode") or "")
+        gemeentenaam = (doc.get("gemeentenaam") or "").strip()
+        if code and gemeentenaam:
+            gemeenten.append({"code": code, "naam": gemeentenaam, "rd": doc.get("centroide_rd") or ""})
+    _provincie_cache[naam] = gemeenten
+    return gemeenten
+
+
+def rd_omvang(coordinates) -> tuple[float, float, float, float] | None:
+    xs: list[float] = []
+    ys: list[float] = []
+
+    def loop(node) -> None:
+        if isinstance(node, list) and len(node) >= 2 and isinstance(node[0], (int, float)):
+            x, y = wgs_naar_rd(float(node[1]), float(node[0]))
+            xs.append(x)
+            ys.append(y)
+        elif isinstance(node, list):
+            for item in node:
+                loop(item)
+
+    loop(coordinates)
+    if not xs:
+        return None
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def provincie_vak(naam: str) -> tuple[dict | None, str | None]:
+    if naam not in PROVINCIES:
+        return None, "Kies een provincie uit de lijst."
+    gemeenten = gemeenten_van_provincie(naam)
+    if not gemeenten:
+        return None, "Voor die provincie zijn geen gemeenten gevonden."
+    url = PROVINCIES_GRENZEN + "?" + urllib.parse.urlencode({
+        "f": "json",
+        "limit": "1",
+        "filter-lang": "cql2-text",
+        "filter": f"naam = '{naam.replace(chr(39), '')}'",
+    })
+    status, raw = fetch(url, "application/json", 30)
+    omvang = None
+    if status == 200:
+        features = json.loads(raw.decode("utf-8")).get("features") or []
+        if features:
+            omvang = rd_omvang((features[0].get("geometry") or {}).get("coordinates"))
+    if not omvang:
+        punten = []
+        for gemeente in gemeenten:
+            rd = punt(gemeente["rd"])
+            if rd:
+                punten.append(rd)
+        if not punten:
+            return None, "Die provincie heeft geen kaartvlak."
+        omvang = (
+            min(item[0] for item in punten) - 12000,
+            min(item[1] for item in punten) - 12000,
+            max(item[0] for item in punten) + 12000,
+            max(item[1] for item in punten) + 12000,
+        )
+    minx, miny, maxx, maxy = omvang
+    return {
+        "minx": minx - 2000, "miny": miny - 2000, "maxx": maxx + 2000, "maxy": maxy + 2000,
+        "cx": None, "cy": None, "straal": None,
+        "label": naam, "gemeente": "", "code": "", "provincie": naam,
+        "codes": [gemeente["code"] for gemeente in gemeenten],
+        "gemeenten": [gemeente["naam"] for gemeente in gemeenten],
+    }, None
+
+
+def plannen_van_provincie(codes: list[str], gekozen: list[str], limiet: int) -> tuple[list[str], bool]:
+    emmers = [plannen_uit_index(code, gekozen) for code in codes]
+    emmers = [emmer for emmer in emmers if emmer]
+    gekozen_ids: list[str] = []
+    gezien: set[str] = set()
+    while len(gekozen_ids) < limiet and any(emmers):
+        for emmer in emmers:
+            if not emmer or len(gekozen_ids) >= limiet:
+                continue
+            plan_id = emmer.pop(0)
+            if plan_id not in gezien:
+                gezien.add(plan_id)
+                gekozen_ids.append(plan_id)
+    return gekozen_ids, any(emmers)
+
+
+def codes_met_voorganger(codes: list[str]) -> set[str]:
+    toegestaan = set(codes)
+    for code in codes:
+        toegestaan.update(VOORGANGER.get(code, []))
+    return toegestaan
+
+
+def plan_hoort(plan_id: str, codes: set[str]) -> bool:
+    delen = plan_id.split(".")
+    if len(delen) < 3:
+        return False
+    return delen[2] in codes or delen[2].startswith("99")
+
+
+def geen_vlak(vak: dict, gekozen: list[str]) -> bool:
+    if not all(term in {"kamerverhuur", "kamerbewoning"} for term in gekozen):
+        return False
+    if vak.get("provincie"):
+        return not any(plannen_uit_index(code, gekozen) for code in vak.get("codes") or [])
+    return bool(vak.get("code")) and not plannen_uit_index(vak.get("code") or "", gekozen)
+
+
 def termen(params: dict) -> list[str]:
     ruw = params.get("bestemming") or ",".join(TERMS)
     gekozen = []
@@ -243,12 +378,15 @@ def past_bij(naam: str, gekozen: list[str]) -> bool:
     return any(woord in tekst for woord in gekozen)
 
 
-def plannen(vak: dict) -> list[str]:
+def plannen(vak: dict, max_zijde: int | None = None) -> list[str]:
     breedte = max(vak["maxx"] - vak["minx"], 1)
     hoogte = max(vak["maxy"] - vak["miny"], 1)
     stap = 900 if max(breedte, hoogte) < 16000 else 2200
     kolommen = min(12, max(3, math.ceil(breedte / stap)))
     rijen = min(12, max(3, math.ceil(hoogte / stap)))
+    if max_zijde:
+        kolommen = min(kolommen, max_zijde)
+        rijen = min(rijen, max_zijde)
     punten = []
     for kolom in range(kolommen):
         for rij in range(rijen):
@@ -548,7 +686,9 @@ def vlakken(plan_ids: list[str], vak: dict, gekozen: list[str], volledig: set[st
         span = max(stuk["maxx"] - stuk["minx"], stuk["maxy"] - stuk["miny"])
         zoom = 11 if span <= 1800 else zoom_voor(stuk)
         tegels = tegel_bereik(stuk, zoom)
-        if volledig and plan_id in volledig:
+        if vak.get("provincie"):
+            limiet = len(tegels) if len(tegels) <= 8 else 8
+        elif volledig and plan_id in volledig:
             limiet = len(tegels) if len(tegels) <= 40 else 40
         else:
             limiet = len(tegels) if len(tegels) <= 20 else (8 if span > 8000 else 20)
@@ -658,10 +798,11 @@ def adressen_van_vlak(vlak: dict, vak: dict) -> list[dict]:
         if not binnen(x, y, vlak["ringen"]) and (groot or afstand(x, y, vlak["ringen"]) > 12):
             continue
         props = feature.get("properties") or {}
-        if vak.get("gemeente"):
-            bron = (props.get("bronhouder_naam") or "").strip().casefold()
-            if bron and bron != vak["gemeente"].strip().casefold():
-                continue
+        bron = (props.get("bronhouder_naam") or "").strip().casefold()
+        if bron and vak.get("gemeente") and bron != vak["gemeente"].strip().casefold():
+            continue
+        if bron and vak.get("gemeenten") and bron not in {naam.strip().casefold() for naam in vak["gemeenten"]}:
+            continue
         adres = adres_tekst(props)
         if not adres:
             continue
@@ -713,11 +854,27 @@ def zoek(params: dict) -> dict:
         bundel = gecached[1]
     else:
         try:
-            uit_index = plannen_uit_index(vak.get("code") or "", gekozen)
-            plan_ids = list(dict.fromkeys(uit_index + plannen(vak)))
+            if vak.get("provincie"):
+                if "horeca" in gekozen and any(term != "horeca" for term in gekozen):
+                    uit_index, meer = plannen_van_provincie(vak["codes"], [term for term in gekozen if term != "horeca"], 16)
+                    toegestaan = codes_met_voorganger(vak["codes"])
+                    extra = [plan_id for plan_id in plannen(vak, 5) if plan_hoort(plan_id, toegestaan)][:8]
+                    meer = True
+                elif "horeca" in gekozen:
+                    uit_index, meer = [], True
+                    toegestaan = codes_met_voorganger(vak["codes"])
+                    extra = [plan_id for plan_id in plannen(vak, 5) if plan_hoort(plan_id, toegestaan)][:16]
+                else:
+                    uit_index, meer = plannen_van_provincie(vak["codes"], gekozen, 24)
+                    extra = []
+                plan_ids = list(dict.fromkeys(uit_index + extra))
+            else:
+                uit_index = plannen_uit_index(vak.get("code") or "", gekozen)
+                plan_ids = list(dict.fromkeys(uit_index + plannen(vak)))
+                meer = False
             vlak_lijst = [vlak for vlak in vlakken(plan_ids, vak, gekozen, set(uit_index)) if overlapt(vlak, vak)]
             matches, afgekapt = adressen(vlak_lijst, vak, gekozen) if vlak_lijst else ([], False)
-            afgekapt = afgekapt or len(vlak_lijst) > 80
+            afgekapt = afgekapt or len(vlak_lijst) > 80 or meer
         except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
             return {"fout": "De bestemmingskaart of de BAG antwoordt niet."}
         matches.sort(key=lambda item: item["adres"])
@@ -734,7 +891,7 @@ def zoek(params: dict) -> dict:
         "afgekapt": bundel["afgekapt"],
         "gebied": vak["label"],
         "bestemming": gekozen,
-        "geenVlak": all(term in {"kamerverhuur", "kamerbewoning"} for term in gekozen) and bool(vak.get("code")) and not plannen_uit_index(vak.get("code") or "", gekozen),
+        "geenVlak": geen_vlak(vak, gekozen),
         "bron": "Vastgesteld bestemmingsplan via PDOK, halfjaarlijks bijgewerkt. Adressen uit de BAG.",
         "resultaten": matches[start:start + PAGE_SIZE],
     }

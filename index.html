@@ -349,6 +349,7 @@
         delen.push("Panden");
         if (termen.length) delen.push(termen.join(", "));
         if (gemeenteNaam) delen.push(gemeenteNaam);
+        else if (!plaats && document.querySelector("#provincie").value) delen.push(gekozen("#provincie"));
         if (plaats) delen.push(straal ? `${plaats} ${gekozen("#straal")}` : `${plaats} 2 km`);
         return delen.join(" · ");
       }
@@ -607,7 +608,7 @@
         return;
       }
       const aantal = data.totaal.toLocaleString("nl-NL");
-      const extra = data.afgekapt ? "De lijst is afgekapt op 400 adressen." : "";
+      const extra = data.afgekapt ? (data.totaal >= 400 ? "De lijst is afgekapt op 400 adressen." : "Er zijn meer plannen dan deze lijst heeft doorzocht.") : "";
       status.textContent = extra ? `${aantal} adressen. ${extra}` : `${aantal} adressen.`;
       if (invouwen && smal.matches) zetFilters(false);
       if (data.resultaten.length === 0) {

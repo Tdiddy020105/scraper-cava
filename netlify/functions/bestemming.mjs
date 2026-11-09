@@ -9,6 +9,31 @@ const TILES = "https://service.pdok.nl/omgevingswet/ruimtelijkeplannen/api/v1_0/
 const LOCATIE = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free";
 const BAG = "https://api.pdok.nl/kadaster/bag/ogc/v2/collections/adres/items";
 const GRENZEN = "https://api.pdok.nl/kadaster/bestuurlijkegebieden/ogc/v1/collections/gemeentegebied/items";
+const PROVINCIES_GRENZEN = "https://api.pdok.nl/kadaster/bestuurlijkegebieden/ogc/v1/collections/provinciegebied/items";
+const PROVINCIES = new Set(["Drenthe", "Flevoland", "Fryslân", "Gelderland", "Groningen", "Limburg", "Noord-Brabant", "Noord-Holland", "Overijssel", "Utrecht", "Zeeland", "Zuid-Holland"]);
+const VOORGANGER = {
+  "0014": ["0040"],
+  "0361": ["0365"],
+  "0484": ["0499"],
+  "0575": ["0576"],
+  "1901": ["0497"],
+  "1940": ["0055"],
+  "1945": ["0282"],
+  "1949": ["0063", "0070", "1908"],
+  "1950": ["0048"],
+  "1952": ["0040", "1987"],
+  "1959": ["0000"],
+  "1960": ["0236", "0733"],
+  "1961": ["0545", "0707"],
+  "1963": ["0584", "0585"],
+  "1966": ["1651"],
+  "1970": ["0058", "1722"],
+  "1979": ["0003", "0010"],
+  "1980": ["0416"],
+  "1982": ["0756", "0815", "1702"],
+  "1992": ["0501", "0614"],
+};
+const provincieCache = new Map();
 const PAGE_SIZE = 15;
 const MAX_MATCHES = 400;
 const ORIGIN_X = -285401.92;
@@ -20,28 +45,7 @@ const cache = new Map();
 const INDEX = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "plannen-index.json"), "utf8"));
 
 function plannenUitIndex(code, gekozen) {
-  const codes = [code, ...({
-    "0014": ["0040"],
-    "0361": ["0365"],
-    "0484": ["0499"],
-    "0575": ["0576"],
-    "1901": ["0497"],
-    "1940": ["0055"],
-    "1945": ["0282"],
-    "1949": ["0063", "0070", "1908"],
-    "1950": ["0048"],
-    "1952": ["0040", "1987"],
-    "1959": ["0000"],
-    "1960": ["0236", "0733"],
-    "1961": ["0545", "0707"],
-    "1963": ["0584", "0585"],
-    "1966": ["1651"],
-    "1970": ["0058", "1722"],
-    "1979": ["0003", "0010"],
-    "1980": ["0416"],
-    "1982": ["0756", "0815", "1702"],
-    "1992": ["0501", "0614"],
-  }[code] || [])];
+  const codes = [code, ...(VOORGANGER[code] || [])];
   const ids = [];
   for (const gemeente of codes) {
     const termen = INDEX[gemeente] || {};
@@ -142,7 +146,9 @@ async function gebied(params) {
     }, null];
   }
   if (gemeente) return gemeenteVak(gemeente);
-  return [null, "Kies een plaats of een gemeente."];
+  const provincie = String(params.provincie || "").trim();
+  if (provincie) return provincieVak(provincie);
+  return [null, "Kies een plaats, een gemeente of een provincie."];
 }
 
 function uitersten(coordinates) {
@@ -185,6 +191,113 @@ async function gemeenteVak(naam) {
   return [{ minx: x - 8000, miny: y - 8000, maxx: x + 8000, maxy: y + 8000, cx: null, cy: null, straal: null, label: officieel, gemeente: officieel, code: doc.gemeentecode || "" }, null];
 }
 
+async function gemeentenVanProvincie(naam) {
+  if (provincieCache.has(naam)) return provincieCache.get(naam);
+  const url = `${LOCATIE}?${new URLSearchParams([
+    ["q", "*"],
+    ["fq", "type:gemeente"],
+    ["fq", `provincienaam:${naam}`],
+    ["rows", "100"],
+    ["fl", "gemeentecode,gemeentenaam,centroide_rd"],
+    ["sort", "gemeentenaam asc"],
+  ])}`;
+  const [status, data] = await fetchJson(url, 30000);
+  const gemeenten = status === 200 ? (data?.response?.docs || []).flatMap((doc) => {
+    const code = String(doc.gemeentecode || "");
+    const gemeentenaam = String(doc.gemeentenaam || "").trim();
+    return code && gemeentenaam ? [{ code, naam: gemeentenaam, rd: doc.centroide_rd || "" }] : [];
+  }) : [];
+  provincieCache.set(naam, gemeenten);
+  return gemeenten;
+}
+
+function rdOmvang(coordinates) {
+  let minx = Infinity;
+  let miny = Infinity;
+  let maxx = -Infinity;
+  let maxy = -Infinity;
+  let aantal = 0;
+  const loop = (node) => {
+    if (Array.isArray(node) && node.length >= 2 && typeof node[0] === "number") {
+      const [x, y] = wgsNaarRd(node[1], node[0]);
+      if (x < minx) minx = x;
+      if (y < miny) miny = y;
+      if (x > maxx) maxx = x;
+      if (y > maxy) maxy = y;
+      aantal += 1;
+    } else if (Array.isArray(node)) node.forEach(loop);
+  };
+  loop(coordinates);
+  if (!aantal) return null;
+  return [minx, miny, maxx, maxy];
+}
+
+async function provincieVak(naam) {
+  if (!PROVINCIES.has(naam)) return [null, "Kies een provincie uit de lijst."];
+  const gemeenten = await gemeentenVanProvincie(naam);
+  if (!gemeenten.length) return [null, "Voor die provincie zijn geen gemeenten gevonden."];
+  const url = `${PROVINCIES_GRENZEN}?${new URLSearchParams({
+    f: "json", limit: "1", "filter-lang": "cql2-text",
+    filter: `naam = '${naam.replace(/'/g, "")}'`,
+  })}`;
+  const [status, data] = await fetchJson(url, 30000);
+  let omvang = status === 200 ? rdOmvang(data?.features?.[0]?.geometry?.coordinates) : null;
+  if (!omvang) {
+    const punten = gemeenten.flatMap((gemeente) => {
+      const rd = punt(gemeente.rd);
+      return rd ? [rd] : [];
+    });
+    if (!punten.length) return [null, "Die provincie heeft geen kaartvlak."];
+    omvang = [
+      Math.min(...punten.map(([x]) => x)) - 12000,
+      Math.min(...punten.map(([, y]) => y)) - 12000,
+      Math.max(...punten.map(([x]) => x)) + 12000,
+      Math.max(...punten.map(([, y]) => y)) + 12000,
+    ];
+  }
+  const [minx, miny, maxx, maxy] = omvang;
+  return [{
+    minx: minx - 2000, miny: miny - 2000, maxx: maxx + 2000, maxy: maxy + 2000,
+    cx: null, cy: null, straal: null, label: naam, gemeente: "", code: "", provincie: naam,
+    codes: gemeenten.map((gemeente) => gemeente.code),
+    gemeenten: gemeenten.map((gemeente) => gemeente.naam),
+  }, null];
+}
+
+function plannenVanProvincie(codes, gekozen, limiet) {
+  const emmers = codes.map((code) => plannenUitIndex(code, gekozen)).filter((emmer) => emmer.length);
+  const gekozenIds = [];
+  const gezien = new Set();
+  while (gekozenIds.length < limiet && emmers.some((emmer) => emmer.length)) {
+    for (const emmer of emmers) {
+      if (!emmer.length || gekozenIds.length >= limiet) continue;
+      const planId = emmer.shift();
+      if (!gezien.has(planId)) {
+        gezien.add(planId);
+        gekozenIds.push(planId);
+      }
+    }
+  }
+  return [gekozenIds, emmers.some((emmer) => emmer.length)];
+}
+
+function codesMetVoorganger(codes) {
+  const toegestaan = new Set(codes);
+  for (const code of codes) for (const oud of VOORGANGER[code] || []) toegestaan.add(oud);
+  return toegestaan;
+}
+
+function planHoort(planId, codes) {
+  const planCode = String(planId).split(".")[2] || "";
+  return codes.has(planCode) || planCode.startsWith("99");
+}
+
+function geenVlak(vak, gekozen) {
+  if (!gekozen.every((term) => term === "kamerverhuur" || term === "kamerbewoning")) return false;
+  if (vak.provincie) return !vak.codes.some((code) => plannenUitIndex(code, gekozen).length);
+  return Boolean(vak.code) && plannenUitIndex(vak.code || "", gekozen).length === 0;
+}
+
 function termen(params) {
   const gekozen = [];
   for (const deel of String(params.bestemming || TERMS.join(",")).split(/[,+]/)) {
@@ -220,12 +333,16 @@ async function planInfo(x, y) {
   return resultaten;
 }
 
-async function plannen(vak) {
+async function plannen(vak, maxZijde = 0) {
   const breedte = Math.max(vak.maxx - vak.minx, 1);
   const hoogte = Math.max(vak.maxy - vak.miny, 1);
   const stap = Math.max(breedte, hoogte) < 16000 ? 900 : 2200;
-  const kolommen = Math.min(12, Math.max(3, Math.ceil(breedte / stap)));
-  const rijen = Math.min(12, Math.max(3, Math.ceil(hoogte / stap)));
+  let kolommen = Math.min(12, Math.max(3, Math.ceil(breedte / stap)));
+  let rijen = Math.min(12, Math.max(3, Math.ceil(hoogte / stap)));
+  if (maxZijde) {
+    kolommen = Math.min(kolommen, maxZijde);
+    rijen = Math.min(rijen, maxZijde);
+  }
   const punten = [];
   for (let kolom = 0; kolom < kolommen; kolom += 1) {
     for (let rij = 0; rij < rijen; rij += 1) {
@@ -494,9 +611,11 @@ async function vlakken(planIds, vak, gekozen, volledig = new Set()) {
     const span = Math.max(stuk.maxx - stuk.minx, stuk.maxy - stuk.miny);
     const zoom = span <= 1800 ? 11 : zoomVoor(stuk);
     const tegels = tegelBereik(stuk, zoom);
-    const limiet = volledig.has(planId)
-      ? Math.min(tegels.length, 40)
-      : (tegels.length <= 20 ? tegels.length : (span > 8000 ? 8 : 20));
+    const limiet = vak.provincie
+      ? Math.min(tegels.length, 8)
+      : (volledig.has(planId)
+        ? Math.min(tegels.length, 40)
+        : (tegels.length <= 20 ? tegels.length : (span > 8000 ? 8 : 20)));
     for (const [x, y] of spreid(tegels, limiet)) taken.push([planId, zoom, x, y]);
   });
   const batches = await pool(taken, 12, ([planId, zoom, x, y]) => tegel(planId, zoom, x, y, gekozen));
@@ -593,7 +712,9 @@ async function adressenVanVlak(vlak, vak) {
     if (vak.straal && vak.cx != null && (x - vak.cx) ** 2 + (y - vak.cy) ** 2 > vak.straal ** 2) continue;
     if (!binnen(x, y, vlak.ringen) && (groot || afstand(x, y, vlak.ringen) > 12)) continue;
     const props = feature.properties || {};
-    if (vak.gemeente && props.bronhouder_naam && props.bronhouder_naam.trim().toLowerCase() !== String(vak.gemeente).trim().toLowerCase()) continue;
+    const bron = String(props.bronhouder_naam || "").trim().toLowerCase();
+    if (bron && vak.gemeente && bron !== String(vak.gemeente).trim().toLowerCase()) continue;
+    if (bron && vak.gemeenten && !vak.gemeenten.some((naam) => naam.trim().toLowerCase() === bron)) continue;
     const adres = adresTekst(props);
     if (!adres) continue;
     gevonden.push({
@@ -640,11 +761,31 @@ export async function zoek(params) {
   let bundel = gecached && nu - gecached[0] < 600000 ? gecached[1] : null;
   if (!bundel) {
     try {
-      const uitIndex = plannenUitIndex(vak.code || "", gekozen);
-      const planIds = [...new Set([...uitIndex, ...await plannen(vak)])];
+      let uitIndex;
+      let planIds;
+      let meer = false;
+      if (vak.provincie) {
+        const toegestaan = codesMetVoorganger(vak.codes);
+        if (gekozen.includes("horeca") && gekozen.some((term) => term !== "horeca")) {
+          [uitIndex, meer] = plannenVanProvincie(vak.codes, gekozen.filter((term) => term !== "horeca"), 16);
+          const extra = (await plannen(vak, 5)).filter((planId) => planHoort(planId, toegestaan)).slice(0, 8);
+          planIds = [...new Set([...uitIndex, ...extra])];
+          meer = true;
+        } else if (gekozen.includes("horeca")) {
+          uitIndex = [];
+          planIds = (await plannen(vak, 5)).filter((planId) => planHoort(planId, toegestaan)).slice(0, 16);
+          meer = true;
+        } else {
+          [uitIndex, meer] = plannenVanProvincie(vak.codes, gekozen, 24);
+          planIds = uitIndex;
+        }
+      } else {
+        uitIndex = plannenUitIndex(vak.code || "", gekozen);
+        planIds = [...new Set([...uitIndex, ...await plannen(vak)])];
+      }
       const vlakLijst = (await vlakken(planIds, vak, gekozen, new Set(uitIndex))).filter((vlak) => overlapt(vlak, vak));
       const [matches, afgekaptVlak] = vlakLijst.length ? await adressen(vlakLijst, vak) : [[], false];
-      const afgekapt = afgekaptVlak || vlakLijst.length > 80;
+      const afgekapt = afgekaptVlak || vlakLijst.length > 80 || meer;
       matches.sort((a, b) => a.adres.localeCompare(b.adres, "nl"));
       bundel = { matches, afgekapt };
       if (cache.size > 12) cache.clear();
@@ -661,7 +802,7 @@ export async function zoek(params) {
     afgekapt: bundel.afgekapt,
     gebied: vak.label,
     bestemming: gekozen,
-    geenVlak: gekozen.every((term) => term === "kamerverhuur" || term === "kamerbewoning") && Boolean(vak.code) && plannenUitIndex(vak.code || "", gekozen).length === 0,
+    geenVlak: geenVlak(vak, gekozen),
     bron: "Vastgesteld bestemmingsplan via PDOK, halfjaarlijks bijgewerkt. Adressen uit de BAG.",
     resultaten: bundel.matches.slice(start, start + PAGE_SIZE),
   };
