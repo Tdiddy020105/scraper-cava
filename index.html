@@ -295,8 +295,13 @@
         return;
       }
       timer = setTimeout(async () => {
-        const response = await fetch("/api/gemeenten?q=" + encodeURIComponent(term));
-        const data = await response.json();
+        let data;
+        try {
+          const response = await fetch("/api/gemeenten?q=" + encodeURIComponent(term));
+          data = await leesJson(response);
+        } catch (error) {
+          return;
+        }
         suggesties.innerHTML = "";
         data.gemeenten.forEach((naam) => {
           const item = document.createElement("li");
@@ -382,14 +387,30 @@
       return `<section class="contact"><h3>Eigenaar en contact</h3><dl>${regels}</dl>${redenen ? `<ul class="redenen">${redenen}</ul>` : ""}</section>`;
     }
 
+    async function leesJson(response) {
+      const tekst = await response.text();
+      try {
+        return JSON.parse(tekst);
+      } catch (error) {
+        throw new Error("De zoekserver antwoordt niet. Open http://127.0.0.1:8765 terwijl python server.py draait.");
+      }
+    }
+
     async function zoek() {
       const huidig = ++verzoek;
       status.textContent = "Zoeken in Officiële Bekendmakingen…";
       lijst.innerHTML = "";
       pager.innerHTML = "";
-      const response = await fetch("/api/zoek?" + params().toString());
-      if (huidig !== verzoek) return;
-      const data = await response.json();
+      let data;
+      try {
+        const response = await fetch("/api/zoek?" + params().toString());
+        if (huidig !== verzoek) return;
+        data = await leesJson(response);
+      } catch (error) {
+        if (huidig !== verzoek) return;
+        status.innerHTML = `<span class="fout">${escapeHtml(error.message || "Zoeken is mislukt.")}</span>`;
+        return;
+      }
       if (data.fout) {
         status.innerHTML = `<span class="fout">${escapeHtml(data.fout)}</span>`;
         return;
@@ -462,8 +483,14 @@
       const vak = knop.closest("article").querySelector(".pand");
       vak.hidden = false;
       vak.textContent = "Pandgegevens, perceel en contact ophalen…";
-      const response = await fetch("/api/pand?adres=" + encodeURIComponent(knop.dataset.pand));
-      const data = await response.json();
+      let data;
+      try {
+        const response = await fetch("/api/pand?adres=" + encodeURIComponent(knop.dataset.pand));
+        data = await leesJson(response);
+      } catch (error) {
+        vak.innerHTML = `<p class="pand-fout">${escapeHtml(error.message || "Pandgegevens zijn mislukt.")}</p>`;
+        return;
+      }
       if (data.fout) {
         vak.innerHTML = `<p class="pand-fout">${escapeHtml(data.fout)}</p>`;
         return;
