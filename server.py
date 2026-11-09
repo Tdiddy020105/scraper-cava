@@ -21,6 +21,7 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import bestemming as bestemmingbron
 import contact as contactbron
 
 HOST = "127.0.0.1"
@@ -582,6 +583,10 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/pand":
             params = urllib.parse.parse_qs(parsed.query)
             self.send_json(pand(params.get("adres", [""])[0]))
+            return
+        if parsed.path == "/api/panden":
+            params = {key: value[0] for key, value in urllib.parse.parse_qs(parsed.query).items()}
+            self.send_json(bestemmingbron.zoek(params))
             return
         self.send_json({"fout": "Niet gevonden."}, 404)
 

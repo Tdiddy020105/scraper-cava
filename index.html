@@ -32,7 +32,11 @@
       border: 1px solid var(--line);
       border-radius: 14px;
     }
-    .presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .presets, .modes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .bestemmingen { display: none; gap: 10px 18px; margin: 0 0 12px; }
+    .bestemmingen label { flex-direction: row; align-items: center; gap: 8px; min-height: 36px; color: var(--ink); font-size: 15px; }
+    form.mode-panden .presets, form.mode-panden .publicatie, form.mode-panden .checks { display: none; }
+    form.mode-panden .bestemmingen { display: flex; flex-wrap: wrap; }
     button, .ghost {
       border: 1px solid var(--line);
       background: #fff;
@@ -228,6 +232,16 @@
         <span class="vouw-pijl" aria-hidden="true"></span>
       </button>
       <div id="filters" class="filters">
+      <div class="modes">
+        <button type="button" data-mode="publicaties" class="active">Bekendmakingen</button>
+        <button type="button" data-mode="panden">Panden op bestemming</button>
+      </div>
+      <div class="bestemmingen">
+        <label class="vink"><input type="checkbox" name="term" value="logies" checked>Logies</label>
+        <label class="vink"><input type="checkbox" name="term" value="hotel" checked>Hotel</label>
+        <label class="vink"><input type="checkbox" name="term" value="kamerverhuur" checked>Kamerverhuur</label>
+        <label class="vink"><input type="checkbox" name="term" value="kamerbewoning" checked>Kamerbewoning</label>
+      </div>
       <div class="presets">
         <button type="button" data-preset="horeca">Horecavergunning</button>
         <button type="button" data-preset="plan">Planwijziging horeca</button>
@@ -239,10 +253,10 @@
           <input id="gemeente" name="gemeente" placeholder="Bijv. Amsterdam" autocomplete="off">
           <ul id="suggesties" hidden></ul>
         </label>
-        <label>Trefwoord
+        <label class="publicatie">Trefwoord
           <input id="q" name="q" value="horeca" placeholder="horeca, hotel, kantoor">
         </label>
-        <label>Soort
+        <label class="publicatie">Soort
           <select id="rubriek" name="rubriek">
             <option value="vergunning">Omgevingsvergunning</option>
             <option value="plan">Bestemmingsplan / omgevingsplan</option>
@@ -251,7 +265,7 @@
             <option value="vroeg">Plannen en vergunningen samen</option>
           </select>
         </label>
-        <label>Vanaf
+        <label class="publicatie">Vanaf
           <input id="vanaf" name="vanaf" type="date">
         </label>
         <button class="primary" type="submit">Zoek</button>
@@ -317,6 +331,7 @@
     let pagina = 1;
     let timer;
     let verzoek = 0;
+    let modus = "publicaties";
 
     const jaarGeleden = new Date();
     jaarGeleden.setFullYear(jaarGeleden.getFullYear() - 1);
@@ -326,9 +341,17 @@
       const gekozen = (id) => document.querySelector(id).selectedOptions[0].textContent;
       const delen = [];
       const gemeenteNaam = gemeente.value.trim();
-      const trefwoord = document.querySelector("#q").value.trim();
       const plaats = document.querySelector("#plaats").value.trim();
       const straal = document.querySelector("#straal").value;
+      if (modus === "panden") {
+        const termen = [...document.querySelectorAll("input[name=term]:checked")].map((input) => input.parentElement.textContent.trim());
+        delen.push("Panden");
+        if (termen.length) delen.push(termen.join(", "));
+        if (gemeenteNaam) delen.push(gemeenteNaam);
+        if (plaats) delen.push(straal ? `${plaats} ${gekozen("#straal")}` : `${plaats} 2 km`);
+        return delen.join(" · ");
+      }
+      const trefwoord = document.querySelector("#q").value.trim();
       if (gemeenteNaam) delen.push(gemeenteNaam);
       if (trefwoord) delen.push(trefwoord);
       delen.push(gekozen("#rubriek"));
@@ -358,6 +381,17 @@
       functie: { rubriek: "vergunning", q: "functiewijziging", fase: "" },
       transformatie: { rubriek: "plan", q: "transformatie", fase: "" },
     };
+
+    document.querySelectorAll("[data-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        modus = button.dataset.mode;
+        form.classList.toggle("mode-panden", modus === "panden");
+        document.querySelectorAll("[data-mode]").forEach((item) => item.classList.toggle("active", item === button));
+        pagina = 1;
+        vouwTekst.textContent = filterTekst();
+        zoek({ invouwen: true });
+      });
+    });
 
     document.querySelectorAll("[data-preset]").forEach((button) => {
       button.addEventListener("click", () => {
@@ -411,6 +445,18 @@
       pagina = 1;
       zoek({ invouwen: true });
     });
+
+    function pandParams() {
+      const query = new URLSearchParams();
+      const termen = [...document.querySelectorAll("input[name=term]:checked")].map((input) => input.value);
+      if (termen.length) query.set("bestemming", termen.join(","));
+      for (const id of ["gemeente", "provincie", "plaats", "straal"]) {
+        const value = document.querySelector("#" + id).value.trim();
+        if (value) query.set(id, value);
+      }
+      query.set("page", String(pagina));
+      return query;
+    }
 
     function params() {
       const data = new FormData(form);
@@ -483,9 +529,15 @@
 
     async function zoek({ invouwen = false } = {}) {
       const huidig = ++verzoek;
-      status.textContent = "Zoeken in Officiële Bekendmakingen…";
+      status.textContent = modus === "panden"
+        ? "Bestemmingsvlakken en adressen opzoeken…"
+        : "Zoeken in Officiële Bekendmakingen…";
       lijst.innerHTML = "";
       pager.innerHTML = "";
+      if (modus === "panden") {
+        await zoekPanden(huidig, invouwen);
+        return;
+      }
       let data;
       try {
         const response = await fetch("/api/zoek?" + params().toString());
@@ -534,22 +586,69 @@
         </article>
       `).join("");
 
-      const paginaAantal = Math.ceil(data.totaal / data.perPagina);
-      if (paginaAantal > 1) {
-        const vorige = document.createElement("button");
-        vorige.type = "button";
-        vorige.textContent = "Vorige";
-        vorige.disabled = pagina <= 1;
-        vorige.addEventListener("click", () => { pagina -= 1; zoek(); });
-        const volgende = document.createElement("button");
-        volgende.type = "button";
-        volgende.textContent = "Volgende";
-        volgende.disabled = pagina >= paginaAantal;
-        volgende.addEventListener("click", () => { pagina += 1; zoek(); });
-        const label = document.createElement("span");
-        label.textContent = `Pagina ${pagina} van ${paginaAantal.toLocaleString("nl-NL")}`;
-        pager.append(vorige, label, volgende);
+      toonPager(data.totaal, data.perPagina);
+    }
+
+    async function zoekPanden(huidig, invouwen) {
+      let data;
+      try {
+        const response = await fetch("/api/panden?" + pandParams().toString());
+        if (huidig !== verzoek) return;
+        data = await leesJson(response);
+      } catch (error) {
+        if (huidig !== verzoek) return;
+        status.innerHTML = `<span class="fout">${escapeHtml(error.message || "Zoeken is mislukt.")}</span>`;
+        return;
       }
+      if (huidig !== verzoek) return;
+      if (data.fout) {
+        status.innerHTML = `<span class="fout">${escapeHtml(data.fout)}</span>`;
+        return;
+      }
+      const aantal = data.totaal.toLocaleString("nl-NL");
+      const extra = data.afgekapt ? "De lijst is afgekapt op 400 adressen." : "";
+      status.textContent = extra ? `${aantal} adressen. ${extra}` : `${aantal} adressen.`;
+      if (invouwen && smal.matches) zetFilters(false);
+      if (data.resultaten.length === 0) {
+        lijst.innerHTML = "<p>Geen adressen gevonden waarvan het bestemmingsplan logies, hotel, kamerverhuur of kamerbewoning noemt. Veel plannen schrijven alleen “horeca”.</p>";
+        return;
+      }
+      lijst.innerHTML = data.resultaten.map((item) => `
+        <article class="kaart">
+          <div class="meta">
+            <span class="pill">${escapeHtml(item.bestemming || "bestemming")}</span>
+            <span>${escapeHtml(item.woonplaats || item.gemeente || "")}</span>
+          </div>
+          <h2>${escapeHtml(item.adres)}</h2>
+          <div class="adres">Bestemming: ${escapeHtml(item.bestemming || "")}</div>
+          <div class="acties">
+            <a href="https://omgevingswet.overheid.nl/regels-op-de-kaart/" target="_blank" rel="noopener">Regels op de kaart</a>
+            ${item.lat && item.lon ? `<a href="https://www.openstreetmap.org/directions?to=${item.lat}%2C${item.lon}" target="_blank" rel="noopener">Route</a>` : ""}
+            <button type="button" data-kopieer="${escapeHtml(item.adres)}">Kopieer adres</button>
+            <button type="button" data-pand="${escapeHtml(item.adres)}">Pandgegevens</button>
+          </div>
+          <div class="pand" hidden></div>
+        </article>
+      `).join("");
+      toonPager(data.totaal, data.perPagina);
+    }
+
+    function toonPager(totaal, perPagina) {
+      const paginaAantal = Math.ceil(totaal / perPagina);
+      if (paginaAantal <= 1) return;
+      const vorige = document.createElement("button");
+      vorige.type = "button";
+      vorige.textContent = "Vorige";
+      vorige.disabled = pagina <= 1;
+      vorige.addEventListener("click", () => { pagina -= 1; zoek(); });
+      const volgende = document.createElement("button");
+      volgende.type = "button";
+      volgende.textContent = "Volgende";
+      volgende.disabled = pagina >= paginaAantal;
+      volgende.addEventListener("click", () => { pagina += 1; zoek(); });
+      const label = document.createElement("span");
+      label.textContent = `Pagina ${pagina} van ${paginaAantal.toLocaleString("nl-NL")}`;
+      pager.append(vorige, label, volgende);
     }
 
     lijst.addEventListener("click", async (event) => {

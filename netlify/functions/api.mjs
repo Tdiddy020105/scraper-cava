@@ -1,3 +1,5 @@
+import { zoek as zoekPanden } from "./bestemming.mjs";
+
 const SRU_URL = "https://repository.overheid.nl/sru";
 const LOCATIE_URL = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/suggest";
 const LOCATIE_FREE = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free";
@@ -531,6 +533,7 @@ export default async (request) => {
   try {
     if (url.pathname === "/api/zoek" || url.pathname.endsWith("/zoek")) return jsonResponse(await search(params));
     if (url.pathname === "/api/gemeenten" || url.pathname.endsWith("/gemeenten")) return jsonResponse(await gemeenten(params.q || ""));
+    if (url.pathname === "/api/panden" || url.pathname.endsWith("/panden")) return jsonResponse(await zoekPanden(params));
     if (url.pathname === "/api/pand" || url.pathname.endsWith("/pand")) return jsonResponse(await pand(params.adres || ""));
     return jsonResponse({ fout: "Niet gevonden." }, 404);
   } catch (error) {
