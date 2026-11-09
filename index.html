@@ -158,11 +158,54 @@
       max-width: 78ch;
     }
     .fout { color: var(--accent); }
+    .vouw { display: none; }
     @media (max-width: 800px) {
       header, main { width: min(980px, calc(100% - 24px)); }
-      header { padding-top: 20px; }
+      header { padding-top: 16px; }
       h1 { font-size: 28px; }
-      form { padding: 12px; }
+      form { padding: 0; }
+      form.is-dicht {
+        position: sticky;
+        top: 8px;
+        z-index: 4;
+        box-shadow: 0 10px 24px rgba(28, 25, 21, 0.08);
+      }
+      form.is-dicht .filters { display: none; }
+      .vouw {
+        display: flex;
+        width: 100%;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        border: 0;
+        border-radius: 14px;
+        background: transparent;
+        color: var(--ink);
+        min-height: 56px;
+        padding: 10px 14px;
+        text-align: left;
+      }
+      .vouw-kop { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .vouw-kop strong { font-size: 16px; }
+      .vouw-tekst {
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      form:not(.is-dicht) .vouw-tekst { display: none; }
+      .vouw-pijl {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 9px;
+        border-right: 2px solid var(--ink);
+        border-bottom: 2px solid var(--ink);
+        transform: rotate(-135deg);
+        margin-top: 4px;
+      }
+      form.is-dicht .vouw-pijl { transform: rotate(45deg); margin-top: -4px; }
+      .filters { padding: 0 12px 12px; }
       .grid, .regio { grid-template-columns: 1fr; }
       .acties a, .acties button { flex: 1 1 auto; text-align: center; }
       .checks { grid-template-columns: 1fr; }
@@ -176,7 +219,15 @@
     <h1>Scraper</h1>
   </header>
   <main>
-    <form id="zoek">
+    <form id="zoek" class="is-dicht">
+      <button type="button" class="vouw" id="vouw" aria-expanded="false" aria-controls="filters">
+        <span class="vouw-kop">
+          <strong>Filters</strong>
+          <span class="vouw-tekst" id="vouwtekst"></span>
+        </span>
+        <span class="vouw-pijl" aria-hidden="true"></span>
+      </button>
+      <div id="filters" class="filters">
       <div class="presets">
         <button type="button" data-preset="horeca">Horecavergunning</button>
         <button type="button" data-preset="plan">Planwijziging horeca</button>
@@ -246,6 +297,7 @@
         </label>
         <label class="vink"><input id="adres" name="adres" type="checkbox"><span>Alleen publicaties met een straatadres</span></label>
       </div>
+      </div>
     </form>
     <p id="status" class="status"></p>
     <div id="lijst"></div>
@@ -254,6 +306,9 @@
   </main>
   <script>
     const form = document.querySelector("#zoek");
+    const vouw = document.querySelector("#vouw");
+    const vouwTekst = document.querySelector("#vouwtekst");
+    const smal = window.matchMedia("(max-width: 800px)");
     const status = document.querySelector("#status");
     const lijst = document.querySelector("#lijst");
     const pager = document.querySelector("#pager");
@@ -266,6 +321,36 @@
     const jaarGeleden = new Date();
     jaarGeleden.setFullYear(jaarGeleden.getFullYear() - 1);
     document.querySelector("#vanaf").value = jaarGeleden.toISOString().slice(0, 10);
+
+    function filterTekst() {
+      const gekozen = (id) => document.querySelector(id).selectedOptions[0].textContent;
+      const delen = [];
+      const gemeenteNaam = gemeente.value.trim();
+      const trefwoord = document.querySelector("#q").value.trim();
+      const plaats = document.querySelector("#plaats").value.trim();
+      const straal = document.querySelector("#straal").value;
+      if (gemeenteNaam) delen.push(gemeenteNaam);
+      if (trefwoord) delen.push(trefwoord);
+      delen.push(gekozen("#rubriek"));
+      const vanaf = document.querySelector("#vanaf").value;
+      if (vanaf) delen.push("vanaf " + new Date(vanaf + "T00:00:00").toLocaleDateString("nl-NL"));
+      if (document.querySelector("#provincie").value) delen.push(gekozen("#provincie"));
+      if (plaats) delen.push(straal ? `${plaats} ${gekozen("#straal")}` : plaats);
+      if (document.querySelector("#fase").value) delen.push(gekozen("#fase"));
+      if (document.querySelector("#adres").checked) delen.push("met straatadres");
+      return delen.join(" · ");
+    }
+
+    function zetFilters(open) {
+      form.classList.toggle("is-dicht", !open);
+      vouw.setAttribute("aria-expanded", String(open));
+      vouwTekst.textContent = filterTekst();
+    }
+
+    vouw.addEventListener("click", () => zetFilters(form.classList.contains("is-dicht")));
+    form.addEventListener("change", () => { vouwTekst.textContent = filterTekst(); });
+    form.addEventListener("input", () => { vouwTekst.textContent = filterTekst(); });
+    zetFilters(!smal.matches);
 
     const presets = {
       horeca: { rubriek: "vergunning", q: "horeca", fase: "" },
@@ -283,7 +368,7 @@
         document.querySelectorAll("[data-preset]").forEach((item) => item.classList.remove("active"));
         button.classList.add("active");
         pagina = 1;
-        zoek();
+        zoek({ invouwen: true });
       });
     });
 
@@ -324,7 +409,7 @@
       event.preventDefault();
       suggesties.hidden = true;
       pagina = 1;
-      zoek();
+      zoek({ invouwen: true });
     });
 
     function params() {
@@ -396,7 +481,7 @@
       }
     }
 
-    async function zoek() {
+    async function zoek({ invouwen = false } = {}) {
       const huidig = ++verzoek;
       status.textContent = "Zoeken in Officiële Bekendmakingen…";
       lijst.innerHTML = "";
@@ -422,6 +507,7 @@
       ].filter(Boolean).join(" ");
       const aantal = data.totaal.toLocaleString("nl-NL");
       status.textContent = extra ? `${aantal} publicaties. ${extra}` : `${aantal} publicaties.`;
+      if (invouwen && smal.matches) zetFilters(false);
       if (data.resultaten.length === 0) {
         lijst.innerHTML = "<p>Geen resultaten. Verruim de datum, de gemeente of het trefwoord.</p>";
         return;
@@ -508,7 +594,7 @@
       vak.innerHTML = `<div class="chips">${chips.map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`).join("")}</div>${kaart}${contactBlok(data)}`;
     });
 
-    zoek();
+    zoek({ invouwen: true });
   </script>
 </body>
 </html>
