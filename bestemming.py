@@ -44,7 +44,7 @@ def fetch(url: str, accept: str = "*/*", timeout: int = 25) -> tuple[int, bytes]
 
 def locatie(query: str, soort: str) -> dict | None:
     url = LOCATIE + "?" + urllib.parse.urlencode(
-        {"q": query, "fq": f"type:{soort}", "rows": "1", "fl": "weergavenaam,centroide_ll,centroide_rd,gemeentenaam,woonplaatsnaam"}
+        {"q": query, "fq": f"type:{soort}", "rows": "1", "fl": "weergavenaam,centroide_ll,centroide_rd,gemeentenaam,gemeentecode,woonplaatsnaam"}
     )
     status, raw = fetch(url, "application/json")
     if status != 200:
@@ -130,42 +130,61 @@ def gebied(params: dict) -> tuple[dict | None, str | None]:
     return None, "Kies een plaats of een gemeente."
 
 
+def uitersten(coordinates) -> tuple[list[float], list[float]]:
+    xs: list[float] = []
+    ys: list[float] = []
+
+    def loop(node) -> None:
+        if isinstance(node, list) and node and isinstance(node[0], (int, float)):
+            xs.append(float(node[0]))
+            ys.append(float(node[1]))
+        elif isinstance(node, list):
+            for item in node:
+                loop(item)
+
+    loop(coordinates)
+    return xs, ys
+
+
 def gemeente_vak(naam: str) -> tuple[dict | None, str | None]:
+    doc = locatie(naam, "gemeente")
+    if not doc:
+        return None, "Die gemeente is niet gevonden."
+    officieel = re.sub(r"^Gemeente\s+", "", doc.get("weergavenaam") or naam).strip()
     url = GRENZEN + "?" + urllib.parse.urlencode({
         "f": "json",
-        "limit": "5",
-        "skipGeometry": "true",
-        "filter-lang": "cql-text",
-        "filter": f"naam ILIKE '{naam.replace(chr(39), '')}'",
+        "limit": "1",
+        "filter-lang": "cql2-text",
+        "filter": f"naam = '{officieel.replace(chr(39), '')}'",
     })
     status, raw = fetch(url, "application/json", 30)
-    if status != 200:
-        return None, "De gemeentegrens kon niet worden opgehaald."
-    features = json.loads(raw.decode("utf-8")).get("features") or []
-    gekozen = None
-    for feature in features:
-        props = feature.get("properties") or {}
-        if (props.get("naam") or "").casefold() == naam.casefold():
-            gekozen = feature
-            break
-    if gekozen is None and features:
-        gekozen = features[0]
-    if not gekozen or not gekozen.get("bbox"):
-        doc = locatie(naam, "gemeente")
-        if not doc:
-            return None, "Die gemeente is niet gevonden."
-        lon, lat = punt(doc.get("centroide_ll", "")) or (None, None)
-        if lat is None:
-            return None, "Die gemeente heeft geen kaartpunt."
-        x, y = wgs_naar_rd(lat, lon)
-        return {"minx": x - 6000, "miny": y - 6000, "maxx": x + 6000, "maxy": y + 6000, "cx": None, "cy": None, "straal": None, "label": naam}, None
-    min_lon, min_lat, max_lon, max_lat = gekozen["bbox"]
-    minx, miny = wgs_naar_rd(min_lat, min_lon)
-    maxx, maxy = wgs_naar_rd(max_lat, max_lon)
+    feature = None
+    if status == 200:
+        features = json.loads(raw.decode("utf-8")).get("features") or []
+        feature = features[0] if features else None
+    if feature and (feature.get("geometry") or {}).get("coordinates"):
+        xs, ys = uitersten(feature["geometry"]["coordinates"])
+        if xs:
+            hoeken = [wgs_naar_rd(lat, lon) for lon in (min(xs), max(xs)) for lat in (min(ys), max(ys))]
+            vak = {
+                "minx": min(punt_[0] for punt_ in hoeken),
+                "miny": min(punt_[1] for punt_ in hoeken),
+                "maxx": max(punt_[0] for punt_ in hoeken),
+                "maxy": max(punt_[1] for punt_ in hoeken),
+                "cx": None, "cy": None, "straal": None,
+                "label": officieel,
+                "gemeente": officieel,
+                "code": doc.get("gemeentecode") or "",
+            }
+            return vak, None
+    lon, lat = punt(doc.get("centroide_ll", "")) or (None, None)
+    if lat is None:
+        return None, "Die gemeente heeft geen kaartpunt."
+    x, y = wgs_naar_rd(lat, lon)
     return {
-        "minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy,
-        "cx": None, "cy": None, "straal": None,
-        "label": (gekozen.get("properties") or {}).get("naam") or naam,
+        "minx": x - 8000, "miny": y - 8000, "maxx": x + 8000, "maxy": y + 8000,
+        "cx": None, "cy": None, "straal": None, "label": officieel, "gemeente": officieel,
+        "code": doc.get("gemeentecode") or "",
     }, None
 
 
@@ -189,16 +208,17 @@ def past_bij(naam: str, gekozen: list[str]) -> bool:
 
 
 def plannen(vak: dict) -> list[str]:
-    breedte = max(vak["maxx"] - vak["minx"], vak["maxy"] - vak["miny"])
-    stap = min(1200, max(400, breedte / 4))
+    breedte = max(vak["maxx"] - vak["minx"], 1)
+    hoogte = max(vak["maxy"] - vak["miny"], 1)
+    kolommen = min(8, max(3, math.ceil(breedte / 2200)))
+    rijen = min(8, max(3, math.ceil(hoogte / 2200)))
     punten = []
-    x = vak["minx"]
-    while x <= vak["maxx"] and len(punten) < 24:
-        y = vak["miny"]
-        while y <= vak["maxy"] and len(punten) < 24:
-            punten.append((x, y))
-            y += stap
-        x += stap
+    for kolom in range(kolommen):
+        for rij in range(rijen):
+            punten.append((
+                vak["minx"] + (kolom + 0.5) * breedte / kolommen,
+                vak["miny"] + (rij + 0.5) * hoogte / rijen,
+            ))
     if vak.get("cx") is not None:
         punten.append((vak["cx"], vak["cy"]))
     gevonden: dict[str, str] = {}
@@ -216,7 +236,7 @@ def plan_info(x: float, y: float) -> list[tuple[str, str]]:
         f"{WMS}?service=WMS&version=1.3.0&request=GetFeatureInfo"
         "&layers=bestemmingsplangebied&query_layers=bestemmingsplangebied"
         "&info_format=text/plain&crs=EPSG:28992"
-        f"&bbox={x - 15},{y - 15},{x + 15},{y + 15}&width=31&height=31&i=15&j=15&feature_count=12"
+        f"&bbox={x - 15},{y - 15},{x + 15},{y + 15}&width=31&height=31&i=15&j=15&feature_count=40"
     )
     status, raw = fetch(url, "text/plain", 20)
     if status != 200:
@@ -451,16 +471,47 @@ def doorsnede(links: dict, rechts: dict) -> dict | None:
     return vak
 
 
+def spreid(tegels: list[tuple[int, int]], limiet: int) -> list[tuple[int, int]]:
+    if len(tegels) <= limiet:
+        return tegels
+    xs = sorted({x for x, _ in tegels})
+    ys = sorted({y for _, y in tegels})
+    kolommen = max(1, round(math.sqrt(limiet * max(len(xs), 1) / max(len(ys), 1))))
+    rijen = max(1, math.ceil(limiet / kolommen))
+    gekozen = []
+    gezien = set()
+    for kolom in range(kolommen):
+        for rij in range(rijen):
+            x = xs[min(len(xs) - 1, int((kolom + 0.5) * len(xs) / kolommen))]
+            y = ys[min(len(ys) - 1, int((rij + 0.5) * len(ys) / rijen))]
+            if (x, y) not in gezien:
+                gezien.add((x, y))
+                gekozen.append((x, y))
+    return gekozen[:limiet]
+
+
+def zelfde_gemeente(plan_id: str, code: str) -> bool:
+    delen = plan_id.split(".")
+    if len(delen) < 3 or not code:
+        return True
+    return delen[2] == code or delen[2].startswith("99")
+
+
 def vlakken(plan_ids: list[str], vak: dict, gekozen: list[str]) -> list[dict]:
     taken = []
     with ThreadPoolExecutor(max_workers=8) as pool:
         grenzen = list(pool.map(plan_vak, plan_ids))
+    code = vak.get("code") or ""
     for plan_id, grens in zip(plan_ids, grenzen):
+        if not zelfde_gemeente(plan_id, code):
+            continue
         stuk = doorsnede(vak, grens) if grens else None
         if not stuk:
             continue
-        zoom = 11 if max(stuk["maxx"] - stuk["minx"], stuk["maxy"] - stuk["miny"]) <= 1800 else zoom_voor(stuk)
-        for x, y in tegel_bereik(stuk, zoom)[:24]:
+        span = max(stuk["maxx"] - stuk["minx"], stuk["maxy"] - stuk["miny"])
+        zoom = 11 if span <= 1800 else zoom_voor(stuk)
+        limiet = 8 if span > 8000 else 20
+        for x, y in spreid(tegel_bereik(stuk, zoom), limiet):
             taken.append((plan_id, zoom, x, y))
     gevonden = []
     with ThreadPoolExecutor(max_workers=12) as pool:
@@ -566,6 +617,10 @@ def adressen_van_vlak(vlak: dict, vak: dict) -> list[dict]:
         if not binnen(x, y, vlak["ringen"]) and (groot or afstand(x, y, vlak["ringen"]) > 12):
             continue
         props = feature.get("properties") or {}
+        if vak.get("gemeente"):
+            bron = (props.get("bronhouder_naam") or "").casefold()
+            if bron and bron != vak["gemeente"].casefold():
+                continue
         adres = adres_tekst(props)
         if not adres:
             continue

@@ -77,7 +77,7 @@ function punt(value) {
 }
 
 async function locatie(query, soort) {
-  const url = `${LOCATIE}?${new URLSearchParams({ q: query, fq: `type:${soort}`, rows: "1", fl: "weergavenaam,centroide_ll,centroide_rd,gemeentenaam,woonplaatsnaam" })}`;
+  const url = `${LOCATIE}?${new URLSearchParams({ q: query, fq: `type:${soort}`, rows: "1", fl: "weergavenaam,centroide_ll,centroide_rd,gemeentenaam,gemeentecode,woonplaatsnaam" })}`;
   const [status, data] = await fetchJson(url);
   if (status !== 200) return null;
   return data?.response?.docs?.[0] || null;
@@ -106,26 +106,44 @@ async function gebied(params) {
   return [null, "Kies een plaats of een gemeente."];
 }
 
+function uitersten(coordinates) {
+  const xs = [];
+  const ys = [];
+  const loop = (node) => {
+    if (Array.isArray(node) && node.length && typeof node[0] === "number") {
+      xs.push(node[0]);
+      ys.push(node[1]);
+    } else if (Array.isArray(node)) node.forEach(loop);
+  };
+  loop(coordinates);
+  return [xs, ys];
+}
+
 async function gemeenteVak(naam) {
+  const doc = await locatie(naam, "gemeente");
+  if (!doc) return [null, "Die gemeente is niet gevonden."];
+  const officieel = String(doc.weergavenaam || naam).replace(/^Gemeente\s+/i, "").trim();
   const url = `${GRENZEN}?${new URLSearchParams({
-    f: "json", limit: "5", skipGeometry: "true", "filter-lang": "cql-text",
-    filter: `naam ILIKE '${naam.replace(/'/g, "")}'`,
+    f: "json", limit: "1", "filter-lang": "cql2-text",
+    filter: `naam = '${officieel.replace(/'/g, "")}'`,
   })}`;
   const [status, data] = await fetchJson(url, 30000);
-  if (status !== 200) return [null, "De gemeentegrens kon niet worden opgehaald."];
-  const features = data?.features || [];
-  const gekozen = features.find((feature) => (feature.properties?.naam || "").toLowerCase() === naam.toLowerCase()) || features[0];
-  if (!gekozen?.bbox) {
-    const doc = await locatie(naam, "gemeente");
-    const pair = doc ? punt(doc.centroide_ll) : null;
-    if (!pair) return [null, "Die gemeente is niet gevonden."];
-    const [x, y] = wgsNaarRd(pair[1], pair[0]);
-    return [{ minx: x - 6000, miny: y - 6000, maxx: x + 6000, maxy: y + 6000, cx: null, cy: null, straal: null, label: naam }, null];
+  const feature = status === 200 ? data?.features?.[0] : null;
+  const [xs, ys] = uitersten(feature?.geometry?.coordinates);
+  if (xs.length) {
+    const hoeken = [wgsNaarRd(Math.min(...ys), Math.min(...xs)), wgsNaarRd(Math.min(...ys), Math.max(...xs)), wgsNaarRd(Math.max(...ys), Math.min(...xs)), wgsNaarRd(Math.max(...ys), Math.max(...xs))];
+    return [{
+      minx: Math.min(...hoeken.map(([x]) => x)),
+      miny: Math.min(...hoeken.map(([, y]) => y)),
+      maxx: Math.max(...hoeken.map(([x]) => x)),
+      maxy: Math.max(...hoeken.map(([, y]) => y)),
+      cx: null, cy: null, straal: null, label: officieel, gemeente: officieel, code: doc.gemeentecode || "",
+    }, null];
   }
-  const [minLon, minLat, maxLon, maxLat] = gekozen.bbox;
-  const [minx, miny] = wgsNaarRd(minLat, minLon);
-  const [maxx, maxy] = wgsNaarRd(maxLat, maxLon);
-  return [{ minx, miny, maxx, maxy, cx: null, cy: null, straal: null, label: gekozen.properties?.naam || naam }, null];
+  const pair = punt(doc.centroide_ll);
+  if (!pair) return [null, "Die gemeente heeft geen kaartpunt."];
+  const [x, y] = wgsNaarRd(pair[1], pair[0]);
+  return [{ minx: x - 8000, miny: y - 8000, maxx: x + 8000, maxy: y + 8000, cx: null, cy: null, straal: null, label: officieel, gemeente: officieel, code: doc.gemeentecode || "" }, null];
 }
 
 function termen(params) {
@@ -145,7 +163,7 @@ function pastBij(naam, gekozen) {
 }
 
 async function planInfo(x, y) {
-  const url = `${WMS}?service=WMS&version=1.3.0&request=GetFeatureInfo&layers=bestemmingsplangebied&query_layers=bestemmingsplangebied&info_format=text/plain&crs=EPSG:28992&bbox=${x - 15},${y - 15},${x + 15},${y + 15}&width=31&height=31&i=15&j=15&feature_count=12`;
+  const url = `${WMS}?service=WMS&version=1.3.0&request=GetFeatureInfo&layers=bestemmingsplangebied&query_layers=bestemmingsplangebied&info_format=text/plain&crs=EPSG:28992&bbox=${x - 15},${y - 15},${x + 15},${y + 15}&width=31&height=31&i=15&j=15&feature_count=40`;
   const [status, raw] = await fetchBytes(url, 20000);
   if (status !== 200) return [];
   const tekst = new TextDecoder().decode(raw);
@@ -164,11 +182,18 @@ async function planInfo(x, y) {
 }
 
 async function plannen(vak) {
-  const breedte = Math.max(vak.maxx - vak.minx, vak.maxy - vak.miny);
-  const stap = Math.min(1200, Math.max(400, breedte / 4));
+  const breedte = Math.max(vak.maxx - vak.minx, 1);
+  const hoogte = Math.max(vak.maxy - vak.miny, 1);
+  const kolommen = Math.min(8, Math.max(3, Math.ceil(breedte / 2200)));
+  const rijen = Math.min(8, Math.max(3, Math.ceil(hoogte / 2200)));
   const punten = [];
-  for (let x = vak.minx; x <= vak.maxx && punten.length < 24; x += stap) {
-    for (let y = vak.miny; y <= vak.maxy && punten.length < 24; y += stap) punten.push([x, y]);
+  for (let kolom = 0; kolom < kolommen; kolom += 1) {
+    for (let rij = 0; rij < rijen; rij += 1) {
+      punten.push([
+        vak.minx + (kolom + 0.5) * breedte / kolommen,
+        vak.miny + (rij + 0.5) * hoogte / rijen,
+      ]);
+    }
   }
   if (vak.cx != null) punten.push([vak.cx, vak.cy]);
   const gevonden = new Map();
@@ -391,14 +416,45 @@ function doorsnede(links, rechts) {
   return vak;
 }
 
+function spreid(tegels, limiet) {
+  if (tegels.length <= limiet) return tegels;
+  const xs = [...new Set(tegels.map(([x]) => x))].sort((a, b) => a - b);
+  const ys = [...new Set(tegels.map(([, y]) => y))].sort((a, b) => a - b);
+  const kolommen = Math.max(1, Math.round(Math.sqrt(limiet * Math.max(xs.length, 1) / Math.max(ys.length, 1))));
+  const rijen = Math.max(1, Math.ceil(limiet / kolommen));
+  const gekozen = [];
+  const gezien = new Set();
+  for (let kolom = 0; kolom < kolommen; kolom += 1) {
+    for (let rij = 0; rij < rijen; rij += 1) {
+      const x = xs[Math.min(xs.length - 1, Math.floor((kolom + 0.5) * xs.length / kolommen))];
+      const y = ys[Math.min(ys.length - 1, Math.floor((rij + 0.5) * ys.length / rijen))];
+      const sleutel = `${x},${y}`;
+      if (!gezien.has(sleutel)) {
+        gezien.add(sleutel);
+        gekozen.push([x, y]);
+      }
+    }
+  }
+  return gekozen.slice(0, limiet);
+}
+
+function zelfdeGemeente(planId, code) {
+  const planCode = String(planId).split(".")[2] || "";
+  if (!code || !planCode) return true;
+  return planCode === code || planCode.startsWith("99");
+}
+
 async function vlakken(planIds, vak, gekozen) {
   const grenzen = await pool(planIds, 8, planVak);
   const taken = [];
   planIds.forEach((planId, index) => {
+    if (!zelfdeGemeente(planId, vak.code || "")) return;
     const stuk = grenzen[index] ? doorsnede(vak, grenzen[index]) : null;
     if (!stuk) return;
-    const zoom = Math.max(stuk.maxx - stuk.minx, stuk.maxy - stuk.miny) <= 1800 ? 11 : zoomVoor(stuk);
-    for (const [x, y] of tegelBereik(stuk, zoom).slice(0, 24)) taken.push([planId, zoom, x, y]);
+    const span = Math.max(stuk.maxx - stuk.minx, stuk.maxy - stuk.miny);
+    const zoom = span <= 1800 ? 11 : zoomVoor(stuk);
+    const limiet = span > 8000 ? 8 : 20;
+    for (const [x, y] of spreid(tegelBereik(stuk, zoom), limiet)) taken.push([planId, zoom, x, y]);
   });
   const batches = await pool(taken, 12, ([planId, zoom, x, y]) => tegel(planId, zoom, x, y, gekozen));
   const uniek = new Map();
@@ -494,6 +550,7 @@ async function adressenVanVlak(vlak, vak) {
     if (vak.straal && vak.cx != null && (x - vak.cx) ** 2 + (y - vak.cy) ** 2 > vak.straal ** 2) continue;
     if (!binnen(x, y, vlak.ringen) && (groot || afstand(x, y, vlak.ringen) > 12)) continue;
     const props = feature.properties || {};
+    if (vak.gemeente && props.bronhouder_naam && props.bronhouder_naam.toLowerCase() !== vak.gemeente.toLowerCase()) continue;
     const adres = adresTekst(props);
     if (!adres) continue;
     gevonden.push({
