@@ -21,17 +21,18 @@
       background: var(--paper);
       font: 16px/1.45 "Segoe UI", system-ui, sans-serif;
     }
-    header, main { width: min(760px, calc(100% - 32px)); margin: 0 auto; }
+    header, main { width: min(980px, calc(100% - 32px)); margin: 0 auto; }
     header { padding: 28px 0 0; }
     h1 { margin: 0; font-size: 34px; letter-spacing: -0.04em; }
+    .lead { margin: 8px 0 0; max-width: 62ch; color: var(--muted); }
     form {
-      margin: 22px 0;
+      margin: 22px 0 12px;
       padding: 16px;
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: 14px;
     }
-    .bestemmingen { display: flex; flex-wrap: wrap; gap: 10px 18px; margin: 0 0 12px; }
+    .bestemmingen { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0 0 14px; }
     .bestemmingen label {
       flex-direction: row;
       align-items: center;
@@ -55,14 +56,15 @@
       color: #fff;
       border-color: var(--ink);
     }
+    button:disabled { opacity: 0.45; cursor: default; }
     .grid {
       display: grid;
-      grid-template-columns: 1fr 1fr auto;
+      grid-template-columns: 1.3fr 1fr 1fr 0.7fr auto;
       gap: 10px;
       align-items: end;
     }
     label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
-    input {
+    input, select {
       width: 100%;
       border: 1px solid var(--line);
       background: #fff;
@@ -83,6 +85,7 @@
       flex: 0 0 18px;
       accent-color: var(--ink);
     }
+    .hint { margin: 12px 0 0; color: var(--muted); font-size: 13px; }
     .suggest { position: relative; }
     .suggest ul {
       position: absolute;
@@ -96,7 +99,8 @@
     }
     .suggest li { padding: 10px 8px; border-radius: 6px; cursor: pointer; }
     .suggest li:hover { background: var(--accent-soft); }
-    .status { color: var(--muted); min-height: 1.4em; }
+    .statusregel { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; min-height: 1.4em; }
+    .status { color: var(--muted); margin: 0; }
     .kaart {
       display: grid;
       gap: 6px;
@@ -124,16 +128,28 @@
       min-height: 40px;
       text-decoration: none;
     }
-    .pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 40px; }
-    .note { margin: 28px 0 48px; color: var(--muted); font-size: 13px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { background: #efe8dc; border-radius: 999px; padding: 3px 8px; font-size: 13px; }
+    .pand iframe { width: 100%; height: 190px; border: 0; border-radius: 10px; }
+    .pand-fout { color: var(--accent); font-size: 14px; margin: 0; }
+    .contact { display: grid; gap: 8px; margin-top: 12px; }
+    .contact h3 { margin: 0; font-size: 15px; }
+    .contact dl { display: grid; grid-template-columns: 9.5rem 1fr; gap: 4px 12px; margin: 0; }
+    .contact dt { color: var(--muted); }
+    .contact dd { margin: 0; overflow-wrap: anywhere; }
+    .contact a { color: var(--accent); }
+    .redenen { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+    .redenen strong { color: var(--ink); font-weight: 650; }
+    .pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 28px; }
+    .note { margin: 8px 0 48px; color: var(--muted); font-size: 13px; max-width: 78ch; }
     .fout { color: var(--accent); }
-    .leeg { margin: 0; }
+    .leeg { margin: 8px 0 0; }
     .vouw { display: none; }
     @media (max-width: 800px) {
-      header, main { width: min(760px, calc(100% - 24px)); }
+      header, main { width: min(980px, calc(100% - 24px)); }
       header { padding-top: 16px; }
       h1 { font-size: 28px; }
-      form { padding: 0; }
+      form { padding: 0; margin-top: 14px; }
       form.is-dicht {
         position: sticky;
         top: 8px;
@@ -179,43 +195,77 @@
       .grid { grid-template-columns: 1fr; }
       button.primary, .acties a, .acties button { width: 100%; text-align: center; }
       .kaart h2 { font-size: 17px; }
+      .contact dl { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <header>
     <h1>Scraper</h1>
+    <p class="lead">Zoek adressen waar het plan logies, kamerverhuur of een andere bestemming noemt. Kies een gemeente, een plaats of een provincie.</p>
   </header>
   <main>
     <form id="zoek" class="is-dicht">
       <button type="button" class="vouw" id="vouw" aria-expanded="false" aria-controls="filters">
         <span class="vouw-kop">
           <strong>Zoeken</strong>
-          <span class="vouw-tekst" id="vouwtekst"></span>
+          <span class="vouw-tekst" id="vouwtekst">Logies, Kamerverhuur</span>
         </span>
         <span class="vouw-pijl" aria-hidden="true"></span>
       </button>
       <div id="filters" class="filters">
         <div class="bestemmingen">
           <label><input type="checkbox" name="term" value="logies" checked>Logies</label>
+          <label><input type="checkbox" name="term" value="hotel">Hotel</label>
           <label><input type="checkbox" name="term" value="kamerverhuur" checked>Kamerverhuur</label>
+          <label><input type="checkbox" name="term" value="kamerbewoning">Kamerbewoning</label>
+          <label><input type="checkbox" name="term" value="horeca">Horeca</label>
         </div>
         <div class="grid">
           <label class="suggest">Gemeente
             <input id="gemeente" name="gemeente" placeholder="Amsterdam" autocomplete="off">
             <ul id="suggesties" hidden></ul>
           </label>
+          <label>Provincie
+            <select id="provincie" name="provincie">
+              <option value="">Heel Nederland</option>
+              <option>Drenthe</option>
+              <option>Flevoland</option>
+              <option>Fryslân</option>
+              <option>Gelderland</option>
+              <option>Groningen</option>
+              <option>Limburg</option>
+              <option>Noord-Brabant</option>
+              <option>Noord-Holland</option>
+              <option>Overijssel</option>
+              <option>Utrecht</option>
+              <option>Zeeland</option>
+              <option>Zuid-Holland</option>
+            </select>
+          </label>
           <label>Plaats
-            <input id="plaats" name="plaats" placeholder="Leeg = hele gemeente" autocomplete="off">
+            <input id="plaats" name="plaats" placeholder="Utrecht" autocomplete="off">
+          </label>
+          <label>Straal
+            <select id="straal" name="straal">
+              <option value="">2 km</option>
+              <option value="5">5 km</option>
+              <option value="10">10 km</option>
+              <option value="15">15 km</option>
+            </select>
           </label>
           <button class="primary" type="submit">Zoek</button>
         </div>
+        <p class="hint">Een plaats zoekt in een cirkel en gaat voor de gemeente. Zonder gekozen kilometer is die cirkel 2 km. Een provincie telt alleen als gemeente en plaats leeg zijn.</p>
       </div>
     </form>
-    <p id="status" class="status"></p>
+    <div class="statusregel">
+      <p id="status" class="status"></p>
+      <button type="button" id="kopieerlijst" hidden>Kopieer adressen</button>
+    </div>
     <div id="lijst"></div>
     <div id="pager" class="pager"></div>
-    <p class="note">Adressen waarvan het plan logies of kamerverhuur noemt.</p>
+    <p class="note">Bron: het vastgestelde bestemmingsplan en de open BAG. Bij pandgegevens wordt het perceel opgezocht. Van organisaties kunnen openbare contactgegevens meekomen. Van particulieren wordt geen e-mail of telefoonnummer gezocht.</p>
   </main>
   <script>
     const form = document.querySelector("#zoek");
@@ -225,24 +275,34 @@
     const status = document.querySelector("#status");
     const lijst = document.querySelector("#lijst");
     const pager = document.querySelector("#pager");
+    const kopieerLijst = document.querySelector("#kopieerlijst");
     const suggesties = document.querySelector("#suggesties");
     const gemeente = document.querySelector("#gemeente");
     let pagina = 1;
     let timer;
     let verzoek = 0;
+    let zichtbareAdressen = [];
 
     function gekozenTermen() {
       return [...document.querySelectorAll("input[name=term]:checked")];
+    }
+
+    function veld(id) {
+      return document.querySelector("#" + id).value.trim();
     }
 
     function filterTekst() {
       const termen = gekozenTermen().map((input) => input.parentElement.textContent.trim());
       const delen = [];
       if (termen.length) delen.push(termen.join(", "));
-      const gemeenteNaam = gemeente.value.trim();
-      const plaats = document.querySelector("#plaats").value.trim();
-      if (gemeenteNaam) delen.push(gemeenteNaam);
-      if (plaats) delen.push(plaats);
+      const gemeenteNaam = veld("gemeente");
+      const plaats = veld("plaats");
+      const provincie = veld("provincie");
+      if (plaats) {
+        const straal = document.querySelector("#straal").selectedOptions[0].textContent;
+        delen.push(`${plaats} · ${straal}`);
+      } else if (gemeenteNaam) delen.push(gemeenteNaam);
+      else if (provincie) delen.push(provincie);
       return delen.join(" · ");
     }
 
@@ -302,8 +362,8 @@
       const query = new URLSearchParams();
       const termen = gekozenTermen().map((input) => input.value);
       if (termen.length) query.set("bestemming", termen.join(","));
-      for (const id of ["gemeente", "plaats"]) {
-        const value = document.querySelector("#" + id).value.trim();
+      for (const id of ["gemeente", "provincie", "plaats", "straal"]) {
+        const value = veld(id);
         if (value) query.set(id, value);
       }
       query.set("page", String(pagina));
@@ -316,6 +376,50 @@
       })[char]);
     }
 
+    const eigenaarTypen = {
+      private_individual: "Particulier",
+      company: "Bedrijf",
+      foundation: "Stichting",
+      municipality: "Gemeente",
+      government: "Overheid",
+      association: "Vereniging",
+      other_legal_entity: "Andere rechtspersoon",
+      unknown: "Niet vast te stellen",
+    };
+
+    function contactRegel(label, value, link) {
+      if (!value) return "";
+      const inhoud = link
+        ? `<a href="${escapeHtml(value)}" target="_blank" rel="noopener">${escapeHtml(value)}</a>`
+        : escapeHtml(value);
+      return `<dt>${escapeHtml(label)}</dt><dd>${inhoud}</dd>`;
+    }
+
+    function contactBlok(data) {
+      const eigenaar = data.ownership || {};
+      const contact = data.contact_information || {};
+      const regels = [
+        contactRegel("Perceel", eigenaar.parcel),
+        contactRegel("Eigenaar", eigenaar.owner_name),
+        contactRegel("Type", eigenaarTypen[eigenaar.owner_type] || eigenaar.owner_type),
+        contactRegel("Recht", eigenaar.right),
+        contactRegel("KVK", eigenaar.kvk_number || contact.kvk_number),
+        contactRegel("Organisatie", contact.company_name),
+        contactRegel("Website", contact.website, Boolean(contact.website)),
+        contactRegel("E-mail", contact.email),
+        contactRegel("Telefoon", contact.phone),
+        contactRegel("Vestigingsadres", contact.business_address),
+        contactRegel("Contactpersoon", contact.contact_person),
+        contactRegel("Bron", data.contact_source),
+        contactRegel("Geverifieerd", data.contact_verified ? "Ja" : "Nee"),
+      ].join("");
+      const redenen = (data.unavailable || []).map((item) =>
+        `<li><strong>${escapeHtml(item.reason || "")}</strong> ${escapeHtml(item.detail || "")}</li>`
+      ).join("");
+      if (!regels && !redenen) return "";
+      return `<section class="contact"><h3>Eigenaar en contact</h3><dl>${regels}</dl>${redenen ? `<ul class="redenen">${redenen}</ul>` : ""}</section>`;
+    }
+
     async function leesJson(response) {
       const tekst = await response.text();
       try {
@@ -325,24 +429,28 @@
       }
     }
 
+    function leegmaken() {
+      zichtbareAdressen = [];
+      kopieerLijst.hidden = true;
+      lijst.innerHTML = "";
+      pager.innerHTML = "";
+    }
+
     async function zoek({ invouwen = false } = {}) {
       const termen = gekozenTermen();
       if (termen.length === 0) {
-        status.innerHTML = `<span class="fout">Vink logies of kamerverhuur aan.</span>`;
-        lijst.innerHTML = "";
-        pager.innerHTML = "";
+        status.innerHTML = `<span class="fout">Vink minstens één bestemming aan.</span>`;
+        leegmaken();
         return;
       }
-      if (!gemeente.value.trim() && !document.querySelector("#plaats").value.trim()) {
-        status.innerHTML = `<span class="fout">Vul een gemeente of een plaats in.</span>`;
-        lijst.innerHTML = "";
-        pager.innerHTML = "";
+      if (!veld("gemeente") && !veld("plaats") && !veld("provincie")) {
+        status.innerHTML = `<span class="fout">Vul een gemeente, een plaats of een provincie in.</span>`;
+        leegmaken();
         return;
       }
       const huidig = ++verzoek;
       status.textContent = "Adressen opzoeken…";
-      lijst.innerHTML = "";
-      pager.innerHTML = "";
+      leegmaken();
       let data;
       try {
         const response = await fetch("/api/panden?" + params().toString());
@@ -360,7 +468,8 @@
       }
       const aantal = data.totaal.toLocaleString("nl-NL");
       const extra = data.afgekapt ? (data.totaal >= 400 ? "De lijst is afgekapt op 400 adressen." : "Er zijn meer plannen dan deze lijst heeft doorzocht.") : "";
-      status.textContent = extra ? `${aantal} adressen. ${extra}` : `${aantal} adressen.`;
+      const waar = data.gebied ? ` in ${data.gebied}` : "";
+      status.textContent = extra ? `${aantal} adressen${waar}. ${extra}` : `${aantal} adressen${waar}.`;
       if (invouwen && smal.matches) zetFilters(false);
       if (data.resultaten.length === 0) {
         const gekozen = termen.map((input) => input.value);
@@ -368,11 +477,17 @@
           ? gekozen[0]
           : `${gekozen.slice(0, -1).join(", ")} of ${gekozen.at(-1)}`;
         const zinnen = [`Geen adressen gevonden waarvan het plan ${genoemd} noemt.`];
+        if ((gekozen.includes("hotel") || gekozen.includes("logies")) && !gekozen.includes("horeca")) {
+          zinnen.push("Vink Horeca aan. Veel plannen schrijven alleen dat.");
+        }
+        const kamers = gekozen.filter((woord) => woord === "kamerverhuur" || woord === "kamerbewoning");
         if (data.geenVlak) zinnen.push("De landelijke kaart heeft voor deze gemeente geen vlak met die naam.");
-        else if (gekozen.length === 1 && gekozen[0] === "kamerverhuur") zinnen.push("Er is wel een vlak, maar daar staat geen BAG-adres in.");
+        else if (kamers.length && kamers.length === gekozen.length) zinnen.push("Er is wel een vlak, maar daar staat geen BAG-adres in.");
         lijst.innerHTML = `<p class="leeg">${zinnen.map(escapeHtml).join(" ")}</p>`;
         return;
       }
+      zichtbareAdressen = data.resultaten.map((item) => item.adres);
+      kopieerLijst.hidden = false;
       lijst.innerHTML = data.resultaten.map((item) => `
         <article class="kaart">
           <div class="meta">
@@ -381,9 +496,12 @@
           </div>
           <h2>${escapeHtml(item.adres)}</h2>
           <div class="acties">
+            <a href="https://omgevingswet.overheid.nl/regels-op-de-kaart/" target="_blank" rel="noopener">Regels op de kaart</a>
             ${item.lat && item.lon ? `<a href="https://www.openstreetmap.org/directions?to=${item.lat}%2C${item.lon}" target="_blank" rel="noopener">Route</a>` : ""}
             <button type="button" data-kopieer="${escapeHtml(item.adres)}">Kopieer adres</button>
+            <button type="button" data-pand="${escapeHtml(item.adres)}">Pandgegevens</button>
           </div>
+          <div class="pand" hidden></div>
         </article>
       `).join("");
       toonPager(data.totaal, data.perPagina);
@@ -407,16 +525,56 @@
       pager.append(vorige, label, volgende);
     }
 
+    kopieerLijst.addEventListener("click", async () => {
+      const tekst = zichtbareAdressen.join("\n");
+      try {
+        await navigator.clipboard.writeText(tekst);
+        kopieerLijst.textContent = "Gekopieerd";
+      } catch (error) {
+        kopieerLijst.textContent = "Kopiëren lukt niet";
+      }
+      setTimeout(() => { kopieerLijst.textContent = "Kopieer adressen"; }, 1600);
+    });
+
     lijst.addEventListener("click", async (event) => {
       const kopie = event.target.closest("[data-kopieer]");
-      if (!kopie) return;
-      const adres = kopie.dataset.kopieer;
-      try {
-        await navigator.clipboard.writeText(adres);
-        kopie.textContent = "Gekopieerd";
-      } catch (error) {
-        kopie.textContent = adres;
+      if (kopie) {
+        const adres = kopie.dataset.kopieer;
+        try {
+          await navigator.clipboard.writeText(adres);
+          kopie.textContent = "Gekopieerd";
+        } catch (error) {
+          kopie.textContent = adres;
+        }
+        return;
       }
+      const knop = event.target.closest("[data-pand]");
+      if (!knop) return;
+      const vak = knop.closest("article").querySelector(".pand");
+      vak.hidden = false;
+      vak.textContent = "Pandgegevens ophalen…";
+      let data;
+      try {
+        const response = await fetch("/api/pand?adres=" + encodeURIComponent(knop.dataset.pand));
+        data = await leesJson(response);
+      } catch (error) {
+        vak.innerHTML = `<p class="pand-fout">${escapeHtml(error.message || "Pandgegevens zijn mislukt.")}</p>`;
+        return;
+      }
+      if (data.fout) {
+        vak.innerHTML = `<p class="pand-fout">${escapeHtml(data.fout)}</p>`;
+        return;
+      }
+      const chips = [
+        data.oppervlakte ? `${data.oppervlakte} m²` : "",
+        data.bouwjaar ? `bouwjaar ${data.bouwjaar}` : "",
+        ...(data.gebruiksdoelen || []),
+        data.perceel ? `perceel ${data.perceel}` : "",
+      ].filter(Boolean);
+      const kaart = data.lat && data.lon
+        ? `<iframe title="Kaart" loading="lazy" src="https://www.openstreetmap.org/export/embed.html?bbox=${data.lon - 0.008}%2C${data.lat - 0.005}%2C${data.lon + 0.008}%2C${data.lat + 0.005}&amp;layer=mapnik&amp;marker=${data.lat}%2C${data.lon}"></iframe>`
+        : "";
+      vak.innerHTML = `<div class="chips">${chips.map((chip) => `<span class="chip">${escapeHtml(chip)}</span>`).join("")}</div>${kaart}${contactBlok(data)}`;
     });
   </script>
 </body>
